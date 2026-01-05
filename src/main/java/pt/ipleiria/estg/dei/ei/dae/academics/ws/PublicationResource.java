@@ -330,7 +330,8 @@ public class PublicationResource {
                 ? "application/pdf"
                 : "application/zip";
 
-        p.incrementDownloadCount();
+        // --- ALTERAÇÃO AQUI: Chama o Bean para persistir a contagem ---
+        publicationBean.incrementDownloadCount(id);
 
         return Response.ok(in)
                 .type(contentType)

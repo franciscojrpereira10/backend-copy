@@ -12,7 +12,6 @@ import pt.ipleiria.estg.dei.ei.dae.academics.entities.PublicationHistory;
 import pt.ipleiria.estg.dei.ei.dae.academics.entities.User;
 import pt.ipleiria.estg.dei.ei.dae.academics.enums.FileType;
 import pt.ipleiria.estg.dei.ei.dae.academics.entities.Rating;
-import pt.ipleiria.estg.dei.ei.dae.academics.entities.User;
 import pt.ipleiria.estg.dei.ei.dae.academics.dtos.RatingDTO;
 import pt.ipleiria.estg.dei.ei.dae.academics.entities.Comment;
 import java.util.Date;
@@ -443,5 +442,12 @@ public class PublicationBean {
         return results;
     }
 
-
+    // --- CÓDIGO NOVO ADICIONADO ---
+    // Este método permite atualizar o contador dentro de uma transação
+    public void incrementDownloadCount(Long id) {
+        Publication p = em.find(Publication.class, id);
+        if (p != null) {
+            p.incrementDownloadCount();
+        }
+    }
 }
