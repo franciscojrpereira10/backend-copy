@@ -39,11 +39,16 @@ public class TagResource {
 
     // EP22 - Listar tags
     @GET
-    @Authenticated
-    @RolesAllowed({"CONTRIBUTOR", "MANAGER", "ADMIN"})
-    public Response getAllTags() {
-        List<Tag> tags = tagBean.getAllTags();
-        List<TagDTO> dtos = TagDTO.from(tags);
+    @pt.ipleiria.estg.dei.ei.dae.academics.security.OptionalAuthenticated
+    public Response getAllTags(@Context SecurityContext sc) {
+        String username = null;
+        if (sc.getUserPrincipal() != null) {
+             username = sc.getUserPrincipal().getName();
+        }
+        
+        // Passa o username para o Bean tratar da verificação de subscrição de forma eficiente
+        List<TagDTO> dtos = tagBean.getAllTagsWithSubscriptionStatus(username);
+        
         return Response.ok(dtos).build();
     }
 

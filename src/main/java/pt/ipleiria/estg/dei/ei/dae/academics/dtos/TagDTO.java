@@ -13,7 +13,9 @@ public class TagDTO {
     private String createdByUsername;
     private Date createdAt;
     private int publicationCount;
+
     private int subscriberCount;
+    private boolean subscribed;
 
     public TagDTO() {
     }
@@ -93,6 +95,14 @@ public class TagDTO {
 
     public void setSubscriberCount(int subscriberCount) {
         this.subscriberCount = subscriberCount;
+    }
+
+    public boolean isSubscribed() {
+        return subscribed;
+    }
+
+    public void setSubscribed(boolean subscribed) {
+        this.subscribed = subscribed;
     }
 
     // Métodos de conversão

@@ -66,6 +66,9 @@ public class User implements Serializable {
     @Column(name = "preferred_language", length = 5, nullable = false)
     private String preferredLanguage = "pt";
 
+    @Column(name = "auth_version")
+    private String authVersion; // UUID para invalidar tokens antigos
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private UserStatus status; // ATIVO, SUSPENSO
@@ -246,6 +249,14 @@ public class User implements Serializable {
 
     public void setPreferredLanguage(String preferredLanguage) {
         this.preferredLanguage = preferredLanguage;
+    }
+
+    public String getAuthVersion() {
+        return authVersion;
+    }
+
+    public void setAuthVersion(String authVersion) {
+        this.authVersion = authVersion;
     }
 
     // conveniência para o EP43

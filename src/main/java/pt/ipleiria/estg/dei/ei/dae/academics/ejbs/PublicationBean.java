@@ -3,28 +3,35 @@ package pt.ipleiria.estg.dei.ei.dae.academics.ejbs;
 import jakarta.ejb.Stateless;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import pt.ipleiria.estg.dei.ei.dae.academics.dtos.PublicationDTO;
-import pt.ipleiria.estg.dei.ei.dae.academics.entities.Tag;
-import pt.ipleiria.estg.dei.ei.dae.academics.exceptions.EntityNotFoundException;
-import pt.ipleiria.estg.dei.ei.dae.academics.exceptions.ConflictException;
-import pt.ipleiria.estg.dei.ei.dae.academics.entities.Publication;
-import pt.ipleiria.estg.dei.ei.dae.academics.entities.PublicationHistory;
-import pt.ipleiria.estg.dei.ei.dae.academics.entities.User;
-import pt.ipleiria.estg.dei.ei.dae.academics.enums.FileType;
-import pt.ipleiria.estg.dei.ei.dae.academics.entities.Rating;
-import pt.ipleiria.estg.dei.ei.dae.academics.dtos.RatingDTO;
-import pt.ipleiria.estg.dei.ei.dae.academics.entities.Comment;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
 import jakarta.persistence.TypedQuery;
-import java.util.Comparator;
+import pt.ipleiria.estg.dei.ei.dae.academics.dtos.PublicationDTO;
+import pt.ipleiria.estg.dei.ei.dae.academics.dtos.RatingDTO;
+import pt.ipleiria.estg.dei.ei.dae.academics.entities.*;
+import pt.ipleiria.estg.dei.ei.dae.academics.enums.FileType;
+import pt.ipleiria.estg.dei.ei.dae.academics.exceptions.ConflictException;
+import pt.ipleiria.estg.dei.ei.dae.academics.exceptions.EntityNotFoundException;
+
+// --- Imports Adicionados para IA ---
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+// -----------------------------------
 
 @Stateless
 public class PublicationBean {
 
     @PersistenceContext
     private EntityManager em;
+
+    // --- Configuração OLLAMA ---
+    private static final String OLLAMA_API_URL = "http://ollama:11434/api/generate";
+    private static final String MODEL = "llama3";
+    // ---------------------------
 
     // ===== métodos base =====
     public List<Publication> getAllVisible() {
@@ -103,11 +110,12 @@ public class PublicationBean {
         return avg != null ? avg : 0.0;
     }
 
-    public List<String> tagNames(Publication p) {
-        return em.createQuery(
-                        "SELECT t.name FROM Tag t JOIN t.publications pub WHERE pub = :p", String.class)
+    public List<pt.ipleiria.estg.dei.ei.dae.academics.dtos.TagDTO> tags(Publication p) {
+        List<Tag> tags = em.createQuery(
+                        "SELECT t FROM Tag t JOIN t.publications pub WHERE pub = :p", Tag.class)
                 .setParameter("p", p)
                 .getResultList();
+        return pt.ipleiria.estg.dei.ei.dae.academics.dtos.TagDTO.from(tags);
     }
 
     // DTO detalhado para uma publicação
@@ -118,7 +126,7 @@ public class PublicationBean {
         dto.setCommentCount((int) countComments(p));
         dto.setRatingsCount((int) countRatings(p));
         dto.setAverageRating(averageRating(p));
-        dto.setTags(tagNames(p));
+        dto.setTags(tags(p));
         return dto;
     }
 
@@ -310,6 +318,9 @@ public class PublicationBean {
                 .getResultList();
     }
 
+    @jakarta.ejb.EJB
+    private TagBean tagBean;
+
     public Comment createComment(User author, Publication publication, String content) {
         if (author == null || publication == null) {
             throw new IllegalArgumentException("author/publication cannot be null");
@@ -324,6 +335,21 @@ public class PublicationBean {
         c.setUpdatedAt(new Date());
         em.persist(c);
         em.flush();
+
+        // Notificar subscritores das tags (Cenário 3)
+        try {
+            // Recarregar publicação para garantir acesso às tags
+            Publication p = em.find(Publication.class, publication.getId());
+            if (p != null) {
+                for (Tag t : p.getTags()) {
+                    tagBean.notifyCommentSubscribers(t, p, c);
+                }
+            }
+        } catch (Exception e) {
+            // Não deve bloquear a criação do comentário
+            e.printStackTrace();
+        }
+
         return c;
     }
 
@@ -343,49 +369,7 @@ public class PublicationBean {
                 .getResultList();
     }
 
-    public void associateTag(Long publicationId, Long tagId) {
-        Publication p = em.find(Publication.class, publicationId);
-        if (p == null) {
-            throw new EntityNotFoundException("Publication not found with id " + publicationId);
-        }
 
-        Tag t = em.find(Tag.class, tagId);
-        if (t == null) {
-            throw new EntityNotFoundException("Tag not found with id " + tagId);
-        }
-
-        if (p.getTags().contains(t)) {
-            throw new ConflictException("Tag already associated to this publication");
-        }
-
-        p.getTags().add(t);
-        // se tiveres o lado inverso:
-        // t.getPublications().add(p);
-
-        em.merge(p);
-    }
-
-    public void removeTag(Long publicationId, Long tagId) {
-        Publication p = em.find(Publication.class, publicationId);
-        if (p == null) {
-            throw new EntityNotFoundException("Publication not found with id " + publicationId);
-        }
-
-        Tag t = em.find(Tag.class, tagId);
-        if (t == null) {
-            throw new EntityNotFoundException("Tag not found with id " + tagId);
-        }
-
-        if (!p.getTags().contains(t)) {
-            throw new ConflictException("Tag is not associated to this publication");
-        }
-
-        p.getTags().remove(t);
-        // se manténs o lado inverso:
-        // t.getPublications().remove(p);
-
-        em.merge(p);
-    }
 
     public List<PublicationHistory> findHistory(Long publicationId) {
         return em.createQuery(
@@ -397,15 +381,57 @@ public class PublicationBean {
                 .getResultList();
     }
 
+    // ===== INTEGRAÇÃO IA (OLLAMA) IMPLEMENTADA =====
+    // Versão sobrecarregada para aceitar dados "crus" (antes de criar a entidade)
+    public String generateAutomaticSummary(String title, String authors, String scientificArea, String currentSummary, String language, int maxLength) {
+        try {
+            // Constroi o prompt
+            String promptText = String.format(
+                "Summarize the following scientific publication info in %s (max %d chars). " +
+                "Title: %s. Authors: %s. Area: %s. " +
+                "Existing Summary: %s. " + 
+                "Return ONLY the summary text, nothing else.",
+                language, maxLength, title, authors, scientificArea, 
+                currentSummary != null ? currentSummary : "None"
+            );
+
+            // Escapar JSON
+            String escapedPrompt = promptText.replace("\"", "\\\"").replace("\n", " ");
+            String jsonBody = String.format("{\"model\": \"%s\", \"prompt\": \"%s\", \"stream\": false}", MODEL, escapedPrompt);
+
+            // Cliente HTTP
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(OLLAMA_API_URL))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                String body = response.body();
+                // Regex simples para capturar o campo "response" do JSON do Ollama
+                Pattern pattern = Pattern.compile("\"response\"\\s*:\\s*\"(.*?)\",\\s*\"done\"", Pattern.DOTALL);
+                Matcher matcher = pattern.matcher(body);
+                
+                if (matcher.find()) {
+                    String rawResponse = matcher.group(1);
+                    return rawResponse.replace("\\n", "\n").replace("\\\"", "\"").replace("\\t", "\t");
+                }
+                return "Erro ao processar resposta da IA.";
+            } else {
+                return "Erro na API IA: Código " + response.statusCode();
+            }
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "Falha na geração de resumo: " + e.getMessage() + ". Verifique se o Ollama está a correr.";
+        }
+    }
+
     public String generateAutomaticSummary(Publication p, String language, int maxLength) {
-        String base = p.getSummary();
-        if (base == null || base.isBlank()) {
-            base = "Resumo automático gerado para a publicação \"" + p.getTitle() + "\".";
-        }
-        if (base.length() > maxLength) {
-            base = base.substring(0, Math.max(0, maxLength - 3)) + "...";
-        }
-        return base;
+        return generateAutomaticSummary(p.getTitle(), p.getAuthors(), p.getScientificArea(), p.getSummary(), language, maxLength);
     }
 
     public Map<String, Object> analyzePublication(Publication p,
@@ -441,6 +467,32 @@ public class PublicationBean {
 
         return results;
     }
+
+    public void associateTag(Long publicationId, Long tagId) {
+        Publication p = em.find(Publication.class, publicationId);
+        Tag t = em.find(Tag.class, tagId);
+        
+        if (p != null && t != null) {
+            if (!p.getTags().contains(t)) {
+                p.getTags().add(t);
+                em.merge(p);
+                em.flush(); // Force write
+            }
+        }
+    }
+
+    public void removeTag(Long publicationId, Long tagId) {
+        Publication p = em.find(Publication.class, publicationId);
+        Tag t = em.find(Tag.class, tagId);
+        
+        if (p != null && t != null) {
+            p.removeTag(t);
+            em.merge(p);
+            em.flush();
+        }
+    }
+
+
 
     // Este método permite atualizar o contador dentro de uma transação
     public void incrementDownloadCount(Long id) {

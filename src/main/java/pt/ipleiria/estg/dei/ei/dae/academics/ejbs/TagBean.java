@@ -49,11 +49,79 @@ public class TagBean {
         em.persist(tag);
         return tag;
     }
+
+    // Método seguro para evitar LazyInitializationException e N+1 queries
+    public List<pt.ipleiria.estg.dei.ei.dae.academics.dtos.TagDTO> getAllTagsWithSubscriptionStatus(String username) {
+        // 1. Buscar todas as tags
+        List<Tag> tags = getAllTags();
+        // Converter para DTO
+        List<pt.ipleiria.estg.dei.ei.dae.academics.dtos.TagDTO> dtos = pt.ipleiria.estg.dei.ei.dae.academics.dtos.TagDTO.from(tags);
+        
+        // Mapa para acesso rápido ao DTO por ID
+        java.util.Map<Long, pt.ipleiria.estg.dei.ei.dae.academics.dtos.TagDTO> dtoMap = new java.util.HashMap<>();
+        for (pt.ipleiria.estg.dei.ei.dae.academics.dtos.TagDTO dto : dtos) {
+            dtoMap.put(dto.getId(), dto);
+        }
+
+        try {
+            // 2. Contar Publicações (Agrupado por Tag)
+            List<Object[]> pubCounts = em.createQuery(
+                    "SELECT t.id, COUNT(p) FROM Publication p JOIN p.tags t GROUP BY t.id", Object[].class)
+                    .getResultList();
+            
+            for (Object[] row : pubCounts) {
+                Long tagId = (Long) row[0];
+                Long count = (Long) row[1];
+                if (dtoMap.containsKey(tagId)) {
+                    dtoMap.get(tagId).setPublicationCount(count.intValue());
+                }
+            }
+
+            // 3. Contar Subscritores (Agrupado por Tag)
+            List<Object[]> subCounts = em.createQuery(
+                    "SELECT t.id, COUNT(u) FROM User u JOIN u.subscribedTags t GROUP BY t.id", Object[].class)
+                    .getResultList();
+
+            for (Object[] row : subCounts) {
+                Long tagId = (Long) row[0];
+                Long count = (Long) row[1];
+                if (dtoMap.containsKey(tagId)) {
+                    dtoMap.get(tagId).setSubscriberCount(count.intValue());
+                }
+            }
+
+            // 4. Se houver user, buscar quais ele segue
+            if (username != null) {
+                List<Long> subscribedTagIds = em.createQuery(
+                        "SELECT t.id FROM User u JOIN u.subscribedTags t WHERE u.username = :username", Long.class)
+                        .setParameter("username", username)
+                        .getResultList();
+
+                for (pt.ipleiria.estg.dei.ei.dae.academics.dtos.TagDTO dto : dtos) {
+                    if (subscribedTagIds.contains(dto.getId())) {
+                        dto.setSubscribed(true);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        
+        return dtos;
+    }
+
     public void subscribe(Tag tag, User user) {
         Tag managedTag = em.merge(tag);
         User managedUser = em.merge(user);
 
-        if (managedTag.getSubscribers().contains(managedUser)) {
+        // Forçar inits ou usar query para verificar
+        boolean alreadySubscribed = em.createQuery(
+                "SELECT COUNT(t) FROM User u JOIN u.subscribedTags t WHERE u = :user AND t = :tag", Long.class)
+                        .setParameter("user", managedUser)
+                        .setParameter("tag", managedTag)
+                        .getSingleResult() > 0;
+
+        if (alreadySubscribed) {
             throw new ConflictException("User already subscribed to this tag");
         }
 
@@ -93,9 +161,56 @@ public class TagBean {
         em.remove(managed);
     }
 
+    @jakarta.ejb.EJB
+    private EmailBean emailBean;
+
     public void changeVisibility(Tag tag, boolean visible) {
         tag.setVisible(visible);
         em.merge(tag);
+    }
+
+    // Método para notificar subscritores de que uma nova publicação tem esta tag
+    public void notifySubscribers(Tag tag, pt.ipleiria.estg.dei.ei.dae.academics.entities.Publication publication) {
+        Tag managedTag = em.find(Tag.class, tag.getId());
+        if (managedTag == null) return;
+
+        for (User subscriber : managedTag.getSubscribers()) {
+            if (subscriber.getEmail() != null && !subscriber.getEmail().isBlank()) {
+                String subject = "Nova Publicação na Tag: " + managedTag.getName();
+                String body = "Olá " + subscriber.getUsername() + ",\n\n" +
+                        "Uma nova publicação foi adicionada à tag '" + managedTag.getName() + "'.\n" +
+                        "Título: " + publication.getTitle() + "\n" +
+                        "Autores: " + publication.getAuthors() + "\n\n" +
+                        "Consulta na plataforma para mais detalhes.";
+                
+                emailBean.send(subscriber.getEmail(), subject, body);
+            }
+        }
+    }
+
+    // Método para notificar subscritores de tags sobre um novo comentário (Cenário 3)
+    public void notifyCommentSubscribers(Tag tag, pt.ipleiria.estg.dei.ei.dae.academics.entities.Publication publication, pt.ipleiria.estg.dei.ei.dae.academics.entities.Comment comment) {
+        Tag managedTag = em.find(Tag.class, tag.getId());
+        if (managedTag == null) return;
+
+        for (User subscriber : managedTag.getSubscribers()) {
+            // Não notificar o próprio autor do comentário
+            if (subscriber.getUsername().equals(comment.getAuthor().getUsername())) {
+                continue;
+            }
+
+            if (subscriber.getEmail() != null && !subscriber.getEmail().isBlank()) {
+                String subject = "Novo Comentário em Publicação com Tag: " + managedTag.getName();
+                String body = "Olá " + subscriber.getUsername() + ",\n\n" +
+                        "Um novo comentário foi adicionado à publicação: " + publication.getTitle() + "\n" +
+                        "Tag subscrita: " + managedTag.getName() + "\n" +
+                        "Autor do comentário: " + comment.getAuthor().getUsername() + "\n" +
+                        "Comentário: " + comment.getContent() + "\n\n" +
+                        "Acede à plataforma para ver a discussão.";
+                
+                emailBean.send(subscriber.getEmail(), subject, body);
+            }
+        }
     }
 
 }

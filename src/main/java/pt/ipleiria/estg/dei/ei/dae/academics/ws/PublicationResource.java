@@ -8,6 +8,7 @@ import pt.ipleiria.estg.dei.ei.dae.academics.entities.User;
 import pt.ipleiria.estg.dei.ei.dae.academics.enums.FileType;
 import pt.ipleiria.estg.dei.ei.dae.academics.security.Authenticated;
 import pt.ipleiria.estg.dei.ei.dae.academics.dtos.RatingDTO;
+import pt.ipleiria.estg.dei.ei.dae.academics.dtos.PublicationHistoryDTO;
 import pt.ipleiria.estg.dei.ei.dae.academics.entities.Rating;
 import pt.ipleiria.estg.dei.ei.dae.academics.ejbs.ConfigBean;
 import pt.ipleiria.estg.dei.ei.dae.academics.dtos.CommentDTO;
@@ -16,7 +17,9 @@ import pt.ipleiria.estg.dei.ei.dae.academics.exceptions.BadRequestException;
 import pt.ipleiria.estg.dei.ei.dae.academics.exceptions.EntityNotFoundException;
 import pt.ipleiria.estg.dei.ei.dae.academics.exceptions.ForbiddenException;
 import pt.ipleiria.estg.dei.ei.dae.academics.exceptions.UnauthorizedException;
+import pt.ipleiria.estg.dei.ei.dae.academics.security.OptionalAuthenticated;
 
+// --- NOVOS IMPORTS ADICIONADOS PARA O UPLOAD ---
 import org.jboss.resteasy.plugins.providers.multipart.InputPart;
 import org.jboss.resteasy.plugins.providers.multipart.MultipartFormDataInput;
 import java.io.File;
@@ -27,6 +30,7 @@ import java.util.UUID;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
+// -----------------------------------------------
 
 import jakarta.annotation.security.PermitAll;
 import jakarta.annotation.security.RolesAllowed;
@@ -46,9 +50,12 @@ public class PublicationResource {
     private UserBean userBean;
 
     @EJB
+    private pt.ipleiria.estg.dei.ei.dae.academics.ejbs.TagBean tagBean;
+
+    @EJB
     private ConfigBean configBean;
 
-    // EP05 + EP10
+    // EP05 + EP10 juntos
     @GET
     @PermitAll
     public Response listAndSort(@QueryParam("page") @DefaultValue("0") int page,
@@ -64,7 +71,7 @@ public class PublicationResource {
         return Response.ok(dtos).build();
     }
 
-    // EP06
+    // ===== EP06 - Detalhe de publicação (com estatísticas) =====
     @GET
     @Path("/{id}")
     @PermitAll
@@ -77,7 +84,7 @@ public class PublicationResource {
         return Response.ok(dto).build();
     }
 
-    // EP04
+    // ===== EP04 - Criar publicação (JSON - Mantido Original) =====
     @POST
     @Authenticated
     @RolesAllowed({"CONTRIBUTOR", "MANAGER", "ADMIN"})
@@ -119,7 +126,7 @@ public class PublicationResource {
                 .build();
     }
 
-    // EP-13
+    //EP-13
     @POST
     @Path("/{id}/ratings")
     @Authenticated
@@ -149,10 +156,11 @@ public class PublicationResource {
         return Response.status(Response.Status.CREATED).entity(dto).build();
     }
 
-    // EP-15 (Estatísticas Públicas)
+    //EP-15
     @GET
     @Path("/{id}/ratings")
     @PermitAll
+    @OptionalAuthenticated
     public Response ratingStats(@PathParam("id") Long id,
                                 @Context SecurityContext sc) {
 
@@ -170,30 +178,7 @@ public class PublicationResource {
         return Response.ok(dto).build();
     }
 
-    // --- NOVO ENDPOINT: Buscar o meu voto (Necessário para o frontend) ---
-    @GET
-    @Path("/{id}/ratings/my")
-    @Authenticated
-    @RolesAllowed({"CONTRIBUTOR", "MANAGER", "ADMIN"})
-    public Response getMyRating(@PathParam("id") Long id, @Context SecurityContext sc) {
-        Publication p = publicationBean.find(id);
-        if (p == null) {
-            throw new EntityNotFoundException("Publicação não encontrada");
-        }
-
-        String username = sc.getUserPrincipal().getName();
-        User user = userBean.find(username);
-        
-        Rating rating = publicationBean.findRatingByUserAndPublication(user, p);
-        
-        RatingDTO dto = new RatingDTO();
-        // Se rating for null (ainda não votou), devolve 0
-        dto.setStars(rating != null ? rating.getStars() : 0);
-        
-        return Response.ok(dto).build();
-    }
-    // ---------------------------------------------------------------------
-
+    //EP-16
     @DELETE
     @Path("/{id}/ratings")
     @Authenticated
@@ -216,6 +201,7 @@ public class PublicationResource {
         return Response.ok().build();
     }
 
+    // ===== EP07 - Publicações do próprio =====
     @GET
     @Path("/my")
     @Authenticated
@@ -234,6 +220,7 @@ public class PublicationResource {
         return Response.ok(dtos).build();
     }
 
+    // ===== EP08 - Editar metadados =====
     @PUT
     @Path("/{id}")
     @Authenticated
@@ -277,6 +264,7 @@ public class PublicationResource {
         return Response.ok(dto).build();
     }
 
+    //EP-09
     @GET
     @Path("/search")
     @Produces(MediaType.APPLICATION_JSON)
@@ -300,7 +288,8 @@ public class PublicationResource {
         return Response.ok(dtos).build();
     }
 
-    // EP-11
+
+    //EP-11
     @GET
     @Path("/{id}/download")
     @Authenticated
@@ -338,6 +327,7 @@ public class PublicationResource {
         try {
             in = java.nio.file.Files.newInputStream(path);
         } catch (java.io.IOException e) {
+            // aqui podes manter 500 direto ou criar uma InternalServerErrorException própria
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
         }
 
@@ -345,7 +335,7 @@ public class PublicationResource {
                 ? "application/pdf"
                 : "application/zip";
 
-        // Incrementa o download na BD
+        // ALTERAÇÃO PARA O BEAN (TRANSACTIONAL)
         publicationBean.incrementDownloadCount(id);
 
         return Response.ok(in)
@@ -360,6 +350,7 @@ public class PublicationResource {
         public String reason;
     }
 
+    //EP-12
     @PATCH
     @Path("/{id}/visibility")
     @Authenticated
@@ -396,6 +387,7 @@ public class PublicationResource {
         return Response.ok(dto).build();
     }
 
+    //EP-14
     public static class StarsDTO {
         public Integer stars;
     }
@@ -429,6 +421,7 @@ public class PublicationResource {
         return Response.ok(dto).build();
     }
 
+    // ===== EP17 - Criar comentário =====
     @POST
     @Path("/{id}/comments")
     @Authenticated
@@ -458,6 +451,7 @@ public class PublicationResource {
         return Response.status(Response.Status.CREATED).entity(dto).build();
     }
 
+    // ===== EP18 - Listar comentários =====
     @GET
     @Path("/{id}/comments")
     @Authenticated
@@ -484,7 +478,7 @@ public class PublicationResource {
     @RolesAllowed({"CONTRIBUTOR","MANAGER","ADMIN"})
     public Response history(@PathParam("id") Long id) {
 
-        var history = publicationBean.findHistory(id); 
+        var history = publicationBean.findHistory(id); // método novo no bean
         var dtos = PublicationHistoryDTO.from(history);
 
         Map<String, Object> resp = new HashMap<>();
@@ -495,6 +489,7 @@ public class PublicationResource {
         return Response.ok(resp).build();
     }
 
+    // DTOs para pedidos de IA
     public static class SummaryRequestDTO {
         public String language;
         public Integer maxLength;
@@ -505,6 +500,46 @@ public class PublicationResource {
         public Map<String, Object> parameters;
     }
 
+    public static class SummaryGenerationDTO {
+        public String title;
+        public String authors;
+        public String scientificArea;
+        public String currentSummary;
+        public String language;
+        public Integer maxLength;
+    }
+
+    // NOVO EP: Gerar resumo SEM criação prévia
+    @POST
+    @Path("/ai-summary")
+    @Authenticated
+    @RolesAllowed({"CONTRIBUTOR", "MANAGER", "ADMIN"})
+    public Response generateSummaryForNewPublication(SummaryGenerationDTO body) {
+        if (body == null || body.title == null || body.authors == null) {
+            throw new BadRequestException("title e authors são obrigatórios");
+        }
+
+        String language = body.language != null ? body.language : "pt";
+        int maxLength = body.maxLength != null ? body.maxLength : 500;
+
+        String summary = publicationBean.generateAutomaticSummary(
+                body.title, 
+                body.authors, 
+                body.scientificArea, 
+                body.currentSummary, 
+                language, 
+                maxLength
+        );
+
+        var resp = new java.util.HashMap<String, Object>();
+        resp.put("summary", summary);
+        resp.put("generatedAt", java.time.Instant.now().toString());
+        resp.put("status", "success");
+
+        return Response.ok(resp).build();
+    }
+
+    // EP41 - Gerar resumo automático (ENTITY EXISTENTE)
     @POST
     @Path("/{id}/generate-summary")
     @Authenticated
@@ -535,9 +570,10 @@ public class PublicationResource {
         return Response.ok(resp).build();
     }
 
+    // EP42 - Analisar publicação (keywords)
     @POST
     @Path("/{id}/analyze")
-    @Authenticated
+    @Authenticated   // enunciado diz "todos", mas normalmente precisa de user autenticado
     public Response analyze(@PathParam("id") Long id,
                             AnalyzeRequestDTO body) {
 
@@ -564,6 +600,10 @@ public class PublicationResource {
         return Response.ok(resp).build();
     }
 
+    // ==========================================================
+    //      CÓDIGO ADICIONADO PARA SUPORTE A UPLOAD DE FICHEIROS
+    // ==========================================================
+
     @POST
     @Path("/upload")
     @Consumes(MediaType.MULTIPART_FORM_DATA)
@@ -573,42 +613,50 @@ public class PublicationResource {
         try {
             Map<String, List<InputPart>> uploadForm = input.getFormDataMap();
 
+            // 1. Obter dados textuais do form
             String title = getValue(uploadForm, "title");
             String summary = getValue(uploadForm, "summary");
             String scientificArea = getValue(uploadForm, "scientificArea");
             String authors = getValue(uploadForm, "authors");
 
+            // Validar dados mínimos
             if (title == null || title.isBlank()) {
                 throw new BadRequestException("O título é obrigatório");
             }
 
+            // 2. Identificar o utilizador
             String username = sc.getUserPrincipal().getName();
             User uploader = userBean.find(username);
             if (uploader == null) {
                 throw new UnauthorizedException("User not found");
             }
 
+            // 3. Processar o ficheiro
             List<InputPart> inputParts = uploadForm.get("file");
             String filename = null;
-            FileType fileType = FileType.PDF; 
+            FileType fileType = FileType.PDF; // Default
 
             if (inputParts != null && !inputParts.isEmpty()) {
                 InputPart filePart = inputParts.get(0);
                 String originalName = getFileName(filePart);
                 
+                // Determinar se é PDF ou ZIP
                 if (originalName != null && originalName.toLowerCase().endsWith(".zip")) {
                     fileType = FileType.ZIP;
                 }
                 
+                // Gerar nome único
                 String extension = (fileType == FileType.ZIP) ? ".zip" : ".pdf";
                 filename = UUID.randomUUID().toString() + extension;
                 
+                // Salvar ficheiro no disco (usando o configBean para alinhar com o download)
                 InputStream inputStream = filePart.getBody(InputStream.class, null);
                 writeFile(inputStream, filename);
             } else {
                  throw new BadRequestException("O ficheiro é obrigatório");
             }
 
+            // 4. Gravar na Base de Dados
             Long id = publicationBean.create(
                     title,
                     summary,
@@ -618,6 +666,41 @@ public class PublicationResource {
                     fileType,
                     uploader.getId()
             );
+
+            // --- 5. Processar Tags e Notificar ---
+            String tagsParam = getValue(uploadForm, "tags");
+            if (tagsParam != null && !tagsParam.isBlank()) {
+                // Separar por vírgula
+                String[] tagNames = tagsParam.split(",");
+                Publication publication = publicationBean.find(id); // recarregar para ter a entidade
+                
+                // Precisamos injetar TagBean aqui no Resource
+                // Assumindo que vou adicionar @EJB private TagBean tagBean; na classe
+                
+                for (String tagName : tagNames) {
+                    String safeName = tagName.trim();
+                    if (!safeName.isEmpty()) {
+                        // Procura ou Cria (se for admin/manager? Enunciado diz colaborador pode "associar tags")
+                        // Vamos assumir que se não existir, cria (ou falha se nao tiver permissao, mas create() no TagBean gere isso?)
+                        // UserResource tem createTag mas aqui é simplificado.
+                        // Vou usar o findByName e se não existir, crio.
+                        
+                        pt.ipleiria.estg.dei.ei.dae.academics.entities.Tag t = tagBean.findByName(safeName);
+                        if (t == null) {
+                            // Cria tag nova se não existir
+                            t = tagBean.create(safeName, uploader);
+                        }
+                        
+                        if (t != null) {
+                            // Associa
+                            publicationBean.associateTag(id, t.getId());
+                            
+                            // Notifica
+                            tagBean.notifySubscribers(t, publication);
+                        }
+                    }
+                }
+            }
 
             return Response.status(Response.Status.CREATED)
                     .entity(id)
@@ -629,6 +712,8 @@ public class PublicationResource {
         }
     }
 
+    // Métodos Auxiliares para o Upload
+
     private String getValue(Map<String, List<InputPart>> uploadForm, String key) throws IOException {
         List<InputPart> parts = uploadForm.get(key);
         if (parts != null && !parts.isEmpty()) {
@@ -638,6 +723,7 @@ public class PublicationResource {
     }
 
     private void writeFile(InputStream inputStream, String fileName) throws IOException {
+        // Usa o diretório configurado no ConfigBean (o mesmo usado no download)
         String uploadDir = configBean.getUploadsDir(); 
         
         File customDir = new File(uploadDir);
@@ -674,4 +760,5 @@ public class PublicationResource {
         }
         return "unknown.pdf";
     }
+
 }

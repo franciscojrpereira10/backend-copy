@@ -122,5 +122,18 @@ public class Tag implements Serializable {
     public int getPublicationCount() {
         return publications != null ? publications.size() : 0;
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Tag tag = (Tag) o;
+        return id != null && id.equals(tag.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return 31;
+    }
 }
 

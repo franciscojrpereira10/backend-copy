@@ -12,6 +12,9 @@ public class AuthService {
 
     @PersistenceContext
     private EntityManager em;
+    
+    @jakarta.ejb.EJB
+    private UserBean userBean;
 
     public String authenticate(String username, String password) {
         User user = findUserByUsername(username);
@@ -21,7 +24,21 @@ public class AuthService {
         if (!password.equals(user.getPassword())) {
             return null;
         }
-        return TokenIssuer.issue(username);
+        // EP99 - Bloquear login se não estiver ativo
+        if (user.getStatus() != pt.ipleiria.estg.dei.ei.dae.academics.enums.UserStatus.ACTIVE) {
+            return null; 
+        }
+        
+        // Single Session: Gerar nova versão de autenticação
+        String newVersion = java.util.UUID.randomUUID().toString();
+        System.out.println("DEBUG_AUTH: Generating new version for " + username + ": " + newVersion);
+        user.setAuthVersion(newVersion);
+        
+        // CRITICAL: Force update to DB immediately
+        // We need to inject UserBean first.
+        userBean.update(user);
+        
+        return TokenIssuer.issue(username, newVersion);
     }
 
     public User findUserByUsername(String username) {

@@ -23,7 +23,7 @@ public class PublicationDTO {
     private Date updatedAt;
     private Long uploadedByUserId;
     private String uploadedByName;
-    private List<String> tags;
+    private List<TagDTO> tags;
     private int commentCount;
     private double averageRating;
     private int ratingsCount;
@@ -36,7 +36,7 @@ public class PublicationDTO {
                           String summary, boolean visible, String visibilityReason,
                           String filename, FileType fileType, int downloadCount,
                           Date createdAt, Date updatedAt, Long uploadedByUserId,
-                          String uploadedByName, List<String> tags, int commentCount,
+                          String uploadedByName, List<TagDTO> tags, int commentCount,
                           double averageRating, int ratingsCount) {
         this.id = id;
         this.title = title;
@@ -101,8 +101,8 @@ public class PublicationDTO {
     public String getUploadedByName() { return uploadedByName; }
     public void setUploadedByName(String uploadedByName) { this.uploadedByName = uploadedByName; }
 
-    public List<String> getTags() { return tags; }
-    public void setTags(List<String> tags) {
+    public List<TagDTO> getTags() { return tags; }
+    public void setTags(List<TagDTO> tags) {
         this.tags = (tags != null) ? tags : new ArrayList<>();
     }
 

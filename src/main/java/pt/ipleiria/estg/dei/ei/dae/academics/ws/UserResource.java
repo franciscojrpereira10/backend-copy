@@ -19,6 +19,7 @@ import java.util.Map;
 @Path("/users")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@pt.ipleiria.estg.dei.ei.dae.academics.security.Authenticated
 public class UserResource {
 
     @EJB
@@ -27,6 +28,7 @@ public class UserResource {
     // EP32 - Listar utilizadores
     @GET
     @RolesAllowed({"ADMIN"})
+    @pt.ipleiria.estg.dei.ei.dae.academics.security.Authenticated
     public Response getAll() {
         List<User> users = userBean.getAll();
         List<UserDTO> dtos = UserDTO.from(users);
@@ -156,13 +158,71 @@ public class UserResource {
     @Path("/{id}")
     @RolesAllowed({"ADMIN"})
     public Response delete(@PathParam("id") Long id) {
-        boolean removed = userBean.softDelete(id);
+        boolean removed = userBean.remove(id); // Changed to hard delete
         if (!removed) {
             throw new EntityNotFoundException("Utilizador não encontrado");
         }
         return Response.ok()
-                .entity(java.util.Map.of("message", "Utilizador eliminado; publicações preservadas"))
+                .entity(java.util.Map.of("message", "Utilizador eliminado permanentemente."))
                 .build();
+    }
+
+    // EP - Importar utilizadores via CSV
+    @POST
+    @Path("/import")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @RolesAllowed({"ADMIN"})
+    public Response importUsers(org.jboss.resteasy.plugins.providers.multipart.MultipartFormDataInput input) throws java.io.IOException {
+        Map<String, List<org.jboss.resteasy.plugins.providers.multipart.InputPart>> uploadForm = input.getFormDataMap();
+        List<org.jboss.resteasy.plugins.providers.multipart.InputPart> inputParts = uploadForm.get("file");
+
+        int processed = 0;
+        int created = 0;
+        int failed = 0;
+
+        for (org.jboss.resteasy.plugins.providers.multipart.InputPart inputPart : inputParts) {
+            // Ler o conteúdo do ficheiro
+            java.io.InputStream inputStream = inputPart.getBody(java.io.InputStream.class, null);
+            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(inputStream));
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.trim().isEmpty() || line.startsWith("username")) continue; // Ignorar header ou vazias
+
+                processed++;
+                String[] parts = line.split(",");
+                if (parts.length >= 3) {
+                    String username = parts[0].trim();
+                    String email = parts[1].trim();
+                    String roleStr = parts[2].trim();
+                    
+                    try {
+                        Role role = Role.valueOf(roleStr.toUpperCase());
+                        // Tentar criar
+                        User existing = userBean.find(username);
+                        if (existing == null) {
+                           userBean.create(username, email, "changeme123", role);
+                           created++;
+                        } else {
+                            // Poderia atualizar, mas para já ignora
+                            failed++;
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        failed++;
+                    }
+                } else {
+                    failed++;
+                }
+            }
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("processed", processed);
+        result.put("created", created);
+        result.put("failed", failed);
+
+        return Response.ok(result).build();
     }
 
 }

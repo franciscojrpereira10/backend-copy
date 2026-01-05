@@ -174,12 +174,48 @@ public class UserBean {
     }
 
     // EP37 - soft delete
-    public boolean softDelete(Long id) {
+    // EP37 - hard delete (pedido user: eliminar permanentemente)
+    // EP37 - hard delete (pedido user: eliminar permanentemente)
+    // EP37 - hard delete full
+    public boolean remove(Long id) {
         User user = find(id);
         if (user == null) return false;
 
-        user.setStatus(UserStatus.INACTIVE); // ou SUSPENSO, se preferires
-        // opcional: user.setEmail("deleted+" + user.getId() + "@example");
+        // 1. Apagar Publicações do user e TUDO o que depende delas
+        List<pt.ipleiria.estg.dei.ei.dae.academics.entities.Publication> userPubs = 
+            new java.util.ArrayList<>(user.getPublications());
+            
+        for (pt.ipleiria.estg.dei.ei.dae.academics.entities.Publication p : userPubs) {
+            // Limpar History da Publicação
+            for (pt.ipleiria.estg.dei.ei.dae.academics.entities.PublicationHistory ph : new java.util.ArrayList<>(p.getHistory())) {
+                em.remove(ph);
+            }
+            // Limpar Ratings da Publicação
+            for (pt.ipleiria.estg.dei.ei.dae.academics.entities.Rating r : new java.util.ArrayList<>(p.getRatings())) {
+                em.remove(r);
+            }
+            // Limpar Comentários da Publicação
+            for (pt.ipleiria.estg.dei.ei.dae.academics.entities.Comment c : new java.util.ArrayList<>(p.getComments())) {
+                em.remove(c);
+            }
+            // Limpar Tags (associações)
+            p.getTags().clear(); 
+            // Agora sim, remove a Publicação
+            em.remove(p);
+        }
+        
+        // 2. Remover Comentários feitos pelo user (noutras publicações)
+        for (pt.ipleiria.estg.dei.ei.dae.academics.entities.Comment c : new java.util.ArrayList<>(user.getComments())) {
+             em.remove(c);
+        }
+        
+        // 3. Remover Activities
+        for (pt.ipleiria.estg.dei.ei.dae.academics.entities.Activity a : new java.util.ArrayList<>(user.getActivities())) {
+             em.remove(a);
+        }
+
+        // Ratings, Notifications, Tags(Subscribed) devem ir via Cascade do User ou table join cleanup
+        em.remove(user);
         return true;
     }
 

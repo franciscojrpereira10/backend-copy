@@ -9,9 +9,10 @@ services:
       - POSTGRES_PASSWORD=${DB_PASS}
       - POSTGRES_DB=${DB_NAME}
   smtp:
-    image: ghusta/fakesmtp
+    image: mailhog/mailhog
     ports:
-      - "2525:25"
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI
   webserver:
     build: .
     ports:
@@ -32,4 +33,12 @@ services:
       - smtp
     volumes:
       - ./uploads_data:/opt/jboss/academics_uploads
-    
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  ollama_data:
