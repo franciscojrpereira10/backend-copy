@@ -442,7 +442,6 @@ public class PublicationBean {
         return results;
     }
 
-    // --- CÓDIGO NOVO ADICIONADO ---
     // Este método permite atualizar o contador dentro de uma transação
     public void incrementDownloadCount(Long id) {
         Publication p = em.find(Publication.class, id);
