@@ -42,9 +42,18 @@ public class PublicationBean {
     }
 
     public List<Publication> list(int page, int size) {
-        return em.createQuery(
-                        "SELECT p FROM Publication p WHERE p.visible = true ORDER BY p.createdAt DESC",
-                        Publication.class)
+        // Default behavior: only visible
+        return list(page, size, false);
+    }
+
+    public List<Publication> list(int page, int size, boolean includeHidden) {
+        String jpql = "SELECT p FROM Publication p";
+        if (!includeHidden) {
+            jpql += " WHERE p.visible = true";
+        }
+        jpql += " ORDER BY p.createdAt DESC";
+
+        return em.createQuery(jpql, Publication.class)
                 .setFirstResult(page * size)
                 .setMaxResults(size)
                 .getResultList();
@@ -218,7 +227,8 @@ public class PublicationBean {
     }
     // ===== EP08 - Editar metadados =====
     public Publication updateMetadata(Long id, String title, String summary,
-                                      String scientificArea, String authors, User editor) {
+                                      String scientificArea, String authors, 
+                                      List<String> tagNames, User editor) {
 
         Publication p = em.find(Publication.class, id);
         if (p == null) return null;
@@ -247,8 +257,48 @@ public class PublicationBean {
             p.setAuthors(authors);
         }
 
+        // tags (se a lista não for nula, atualizamos. Lista vazia remove todas)
+        if (tagNames != null) {
+            // 1. Limpar tags atuais que não estão na nova lista
+            // (Para simplificar, limpamos tudo e re-adicionamos, ou fazemos diff. 
+            //  O "p.getTags().clear()" pode ser bruto, melhor diff.)
+            
+            // Vamos usar uma abordagem simples: setTags com as novas.
+            // Precisamos resolver os nomes para Entidades Tag
+            
+            p.getTags().clear(); // Remove associações atuais
+            
+            for (String name : tagNames) {
+                String safeName = name.trim();
+                if (!safeName.isEmpty()) {
+                    Tag t = tagBean.findByName(safeName);
+                    if (t == null) {
+                        t = tagBean.create(safeName, editor);
+                    }
+                    if (!p.getTags().contains(t)) {
+                        p.getTags().add(t);
+                    }
+                }
+            }
+            // Nota: Não registamos histórico de tags individualmente nesta versão simples
+        }
+
         p.edit(); // atualiza updatedAt
         return p;
+    }
+
+    public void update(Publication p) {
+        em.merge(p);
+        em.flush();
+    }
+
+    public void updateFile(Long id, String filename, FileType fileType) {
+        Publication p = em.find(Publication.class, id);
+        if (p != null) {
+            p.setFilename(filename);
+            p.setFileType(fileType);
+            p.edit();
+        }
     }
 
     // auxiliar para gravar uma linha na tabela publication_history
@@ -499,6 +549,67 @@ public class PublicationBean {
         Publication p = em.find(Publication.class, id);
         if (p != null) {
             p.incrementDownloadCount();
+        }
+    }
+
+    public void delete(Long id) {
+        Publication p = em.find(Publication.class, id);
+        if (p != null) {
+            // Limpa as tags associadas (remove da tabela de junção)
+            p.getTags().clear(); // Atualiza a relação ManyToMany
+
+            // Apaga manualmente para garantir que não há erro de FK (Cascade pode falhar se não-carregado)
+            // History
+            em.createQuery("DELETE FROM PublicationHistory h WHERE h.publication.id = :pid")
+              .setParameter("pid", id).executeUpdate();
+            
+            // Comments
+            em.createQuery("DELETE FROM Comment c WHERE c.publication.id = :pid")
+              .setParameter("pid", id).executeUpdate();
+
+            // Ratings
+            em.createQuery("DELETE FROM Rating r WHERE r.publication.id = :pid")
+              .setParameter("pid", id).executeUpdate();
+
+            em.remove(p);
+        }
+    }
+
+    // --- Rating Management ---
+    public Rating findRating(Long id) {
+        return em.find(Rating.class, id);
+    }
+
+    public List<Rating> getRatings(Long publicationId) {
+        return em.createQuery(
+            "SELECT r FROM Rating r WHERE r.publication.id = :pubId ORDER BY r.createdAt DESC", 
+            Rating.class)
+            .setParameter("pubId", publicationId)
+            .getResultList();
+    }
+
+    public void deleteRating(Long ratingId) {
+        Rating r = findRating(ratingId);
+        if (r != null) {
+            // Se estiver numa relação bidirecional com Publication, remove da lista lá
+            if (r.getPublication() != null) {
+                r.getPublication().getRatings().remove(r);
+            }
+            em.remove(r);
+        }
+    }
+
+    public void deleteAllRatings(Long publicationId) {
+        // Usa query para apagar tudo de uma vez (mais eficiente)
+        em.createQuery("DELETE FROM Rating r WHERE r.publication.id = :pubId")
+          .setParameter("pubId", publicationId)
+          .executeUpdate();
+        
+        // Ou se precisares de caches atualizadas, iterar. Mas delete bulk é melhor para "Delete All".
+        // No entanto, para garantir consistência do EM:
+        Publication p = find(publicationId);
+        if (p != null) {
+            p.getRatings().clear();
         }
     }
 }

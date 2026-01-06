@@ -16,6 +16,7 @@ public class CommentBean {
         return em.createQuery(
                         "SELECT c FROM Comment c " +
                                 "JOIN FETCH c.author " +
+                                "JOIN FETCH c.publication " +
                                 "WHERE c.id = :id", Comment.class)
                 .setParameter("id", id)
                 .getResultStream()

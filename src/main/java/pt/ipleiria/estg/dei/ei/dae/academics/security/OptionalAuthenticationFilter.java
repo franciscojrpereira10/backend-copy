@@ -51,7 +51,7 @@ public class OptionalAuthenticationFilter implements ContainerRequestFilter {
         try {
             var claims = getClaims(token);
             String username = claims.getSubject();
-            String tokenVersion = claims.get("version", String.class);
+            String tokenVersion = claims.get("authVersion", String.class);
             
             var user = userBean.find(username);
             if (user == null) return;

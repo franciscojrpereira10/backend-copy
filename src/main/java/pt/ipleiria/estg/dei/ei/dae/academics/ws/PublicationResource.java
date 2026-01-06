@@ -58,12 +58,21 @@ public class PublicationResource {
     // EP05 + EP10 juntos
     @GET
     @PermitAll
+    @OptionalAuthenticated
     public Response listAndSort(@QueryParam("page") @DefaultValue("0") int page,
                                 @QueryParam("size") @DefaultValue("10") int size,
                                 @QueryParam("sortBy") String sortBy,
-                                @QueryParam("order") @DefaultValue("desc") String order) {
+                                @QueryParam("order") @DefaultValue("desc") String order,
+                                @Context SecurityContext sc) {
 
-        List<Publication> data = publicationBean.list(page, size);
+        boolean includeHidden = false;
+        if (sc.getUserPrincipal() != null) {
+            if (sc.isUserInRole("MANAGER") || sc.isUserInRole("ADMIN")) {
+                includeHidden = true;
+            }
+        }
+
+        List<Publication> data = publicationBean.list(page, size, includeHidden);
         List<PublicationDTO> dtos = PublicationDTO.from(data);
 
         dtos = publicationBean.sortPublications(dtos, sortBy, order);
@@ -201,6 +210,50 @@ public class PublicationResource {
         return Response.ok().build();
     }
 
+    // ===== EP-NEW: Gestão de Ratings (Manager/Admin) =====
+    @GET
+    @Path("/{id}/ratings/list")
+    @Authenticated
+    @RolesAllowed({"MANAGER", "ADMIN"})
+    public Response getAllRatings(@PathParam("id") Long id) {
+        Publication p = publicationBean.find(id);
+        if (p == null) {
+            throw new EntityNotFoundException("Publicação não encontrada");
+        }
+        
+        List<Rating> ratings = publicationBean.getRatings(id);
+        List<RatingDTO> dtos = RatingDTO.from(ratings);
+        
+        return Response.ok(dtos).build();
+    }
+
+    @DELETE
+    @Path("/{id}/ratings/{ratingId}")
+    @Authenticated
+    @RolesAllowed({"MANAGER", "ADMIN"})
+    public Response deleteRating(@PathParam("id") Long publicationId, 
+                                 @PathParam("ratingId") Long ratingId) {
+        
+        // Validações básicas
+        Publication p = publicationBean.find(publicationId);
+        if (p == null) throw new EntityNotFoundException("Publicação não encontrada");
+
+        publicationBean.deleteRating(ratingId);
+        return Response.ok().build();
+    }
+
+    @DELETE
+    @Path("/{id}/ratings/all")
+    @Authenticated
+    @RolesAllowed({"MANAGER", "ADMIN"})
+    public Response deleteAllRatings(@PathParam("id") Long publicationId) {
+        Publication p = publicationBean.find(publicationId);
+        if (p == null) throw new EntityNotFoundException("Publicação não encontrada");
+
+        publicationBean.deleteAllRatings(publicationId);
+        return Response.ok().build();
+    }
+
     // ===== EP07 - Publicações do próprio =====
     @GET
     @Path("/my")
@@ -218,6 +271,31 @@ public class PublicationResource {
         List<PublicationDTO> dtos = PublicationDTO.from(data);
 
         return Response.ok(dtos).build();
+    }
+
+    // ===== DELETE Publicação =====
+    @DELETE
+    @Path("/{id}")
+    @Authenticated
+    @RolesAllowed({"CONTRIBUTOR", "MANAGER", "ADMIN"})
+    public Response delete(@PathParam("id") Long id, @Context SecurityContext sc) {
+        Publication p = publicationBean.find(id);
+        if (p == null) {
+            throw new EntityNotFoundException("Publicação não encontrada");
+        }
+
+        String username = sc.getUserPrincipal().getName();
+        User user = userBean.find(username);
+
+        boolean isOwner = p.getUploadedBy() != null && p.getUploadedBy().getUsername().equals(username);
+        boolean isManagerOrAdmin = sc.isUserInRole("MANAGER") || sc.isUserInRole("ADMIN");
+
+        if (!isOwner && !isManagerOrAdmin) {
+            throw new ForbiddenException("Não tens permissão para apagar esta publicação");
+        }
+
+        publicationBean.delete(id);
+        return Response.noContent().build();
     }
 
     // ===== EP08 - Editar metadados =====
@@ -251,12 +329,20 @@ public class PublicationResource {
             throw new BadRequestException("title, authors e scientificArea são obrigatórios");
         }
 
+        List<String> tagNames = null;
+        if (body.getTags() != null) {
+            tagNames = body.getTags().stream()
+                    .map(pt.ipleiria.estg.dei.ei.dae.academics.dtos.TagDTO::getName)
+                    .toList();
+        }
+
         Publication updated = publicationBean.updateMetadata(
                 id,
                 body.getTitle(),
                 body.getSummary(),
                 body.getScientificArea(),
                 body.getAuthors(),
+                tagNames,
                 editor
         );
 
@@ -379,9 +465,13 @@ public class PublicationResource {
                 p.getSummary(),
                 p.getScientificArea(),
                 p.getAuthors(),
+                null, // tags (não alterar)
                 editor
         );
         p.changeVisibility(body.visible, body.reason);
+        // --- FIX: Persistir a alteração ---
+        publicationBean.update(p);
+        // ----------------------------------
 
         PublicationDTO dto = publicationBean.toDetailedDTO(p);
         return Response.ok(dto).build();
@@ -708,6 +798,75 @@ public class PublicationResource {
 
         } catch (IOException e) {
             e.printStackTrace();
+            return Response.status(500).entity("Erro ao processar ficheiro: " + e.getMessage()).build();
+        }
+    }
+
+    // ===== NOVO ENDPOINT: Substituir Ficheiro =====
+    @POST
+    @Path("/{id}/file")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    @Authenticated
+    @RolesAllowed({"CONTRIBUTOR", "MANAGER", "ADMIN"})
+    public Response replaceFile(@PathParam("id") Long id,
+                                MultipartFormDataInput input,
+                                @Context SecurityContext sc) {
+
+        Publication p = publicationBean.find(id);
+        if (p == null) {
+            throw new EntityNotFoundException("Publicação não encontrada");
+        }
+
+        String username = sc.getUserPrincipal().getName();
+        User user = userBean.find(username);
+
+        boolean isOwner = p.getUploadedBy() != null && p.getUploadedBy().getUsername().equals(username);
+        boolean isManagerOrAdmin = sc.isUserInRole("MANAGER") || sc.isUserInRole("ADMIN");
+
+        if (!isOwner && !isManagerOrAdmin) {
+            throw new ForbiddenException("Não tens permissão para alterar este ficheiro");
+        }
+
+        try {
+            Map<String, List<InputPart>> uploadForm = input.getFormDataMap();
+            List<InputPart> inputParts = uploadForm.get("file");
+
+            if (inputParts == null || inputParts.isEmpty()) {
+                throw new BadRequestException("Ficheiro é obrigatório");
+            }
+
+            InputPart filePart = inputParts.get(0);
+            String originalName = getFileName(filePart);
+            FileType fileType = FileType.PDF;
+
+            if (originalName != null && originalName.toLowerCase().endsWith(".zip")) {
+                fileType = FileType.ZIP;
+            }
+
+            String extension = (fileType == FileType.ZIP) ? ".zip" : ".pdf";
+            String newFilename = UUID.randomUUID().toString() + extension;
+
+            // 1. Guardar novo ficheiro
+            InputStream inputStream = filePart.getBody(InputStream.class, null);
+            writeFile(inputStream, newFilename);
+
+            // 2. Apagar ficheiro antigo (Cleanup)
+            try {
+                java.nio.file.Path oldPath = java.nio.file.Paths.get(configBean.getUploadsDir(), p.getFilename());
+                java.nio.file.Files.deleteIfExists(oldPath);
+            } catch (Exception e) {
+                System.err.println("Aviso: Falha ao apagar ficheiro antigo: " + e.getMessage());
+                // Não falha o pedido por causa disto
+            }
+
+            // 3. Atualizar BD
+            publicationBean.updateFile(id, newFilename, fileType);
+
+            return Response.ok()
+                    .entity("Ficheiro atualizado com sucesso")
+                    .build();
+
+        } catch (IOException e) {
             return Response.status(500).entity("Erro ao processar ficheiro: " + e.getMessage()).build();
         }
     }

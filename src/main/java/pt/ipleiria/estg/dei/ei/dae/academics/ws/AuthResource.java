@@ -42,16 +42,20 @@ public class AuthResource {
     @Path("/login")
     public Response login(LoginRequest request) {
         if (request == null || request.getUsername() == null || request.getPassword() == null) {
-            throw new BadRequestException("Username and password are required");
+            throw new BadRequestException("Nome de utilizador e palavra-passe são obrigatórios");
+        }
+
+        User user = authService.findUserByUsername(request.getUsername());
+        if (user == null) {
+            return Response.status(Response.Status.UNAUTHORIZED).entity("Utilizador não encontrado").build();
         }
 
         String token = authService.authenticate(request.getUsername(), request.getPassword());
 
         if (token == null) {
-            throw new InvalidCredentialsException("Invalid username or password");
+            throw new InvalidCredentialsException("Nome de utilizador ou palavra-passe inválidos");
         }
 
-        User user = authService.findUserByUsername(request.getUsername());
         LoginResponse response = new LoginResponse();
         response.setToken(token);
         response.setUsername(request.getUsername());
@@ -69,7 +73,7 @@ public class AuthResource {
     @Path("/user")
     public Response getCurrentUser(@HeaderParam("Authorization") String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            throw new UnauthorizedException("Missing or invalid Authorization header");
+            throw new UnauthorizedException("Cabeçalho de autorização em falta ou inválido");
         }
 
         String username;
@@ -84,13 +88,13 @@ public class AuthResource {
                     .getPayload()
                     .getSubject();
         } catch (Exception e) {
-            throw new UnauthorizedException("Invalid token");
+            throw new UnauthorizedException("Token inválido");
         }
 
         User user = authService.findUserByUsername(username);
 
         if (user == null) {
-            throw new EntityNotFoundException("User not found");
+            throw new EntityNotFoundException("Utilizador não encontrado");
         }
 
         UserDTO userDTO = UserDTO.fromLogin(user);
@@ -104,8 +108,25 @@ public class AuthResource {
      */
     @POST
     @Path("/logout")
-    public Response logout() {
-        return Response.ok("Logged out successfully").build();
+    public Response logout(@HeaderParam("Authorization") String authHeader) {
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            try {
+                String token = authHeader.substring("Bearer ".length()).trim();
+                SecretKey key = new SecretKeySpec(
+                        TokenIssuer.SECRET_KEY, 0, TokenIssuer.SECRET_KEY.length, TokenIssuer.ALGORITHM);
+                String username = Jwts.parser()
+                        .verifyWith(key)
+                        .build()
+                        .parseSignedClaims(token)
+                        .getPayload()
+                        .getSubject();
+                
+                authService.logout(username);
+            } catch (Exception e) {
+                // Ignorar erro no logout (token inválido ou expirado)
+            }
+        }
+        return Response.ok("Sessão terminada com sucesso").build();
     }
 
     /**
@@ -116,7 +137,7 @@ public class AuthResource {
     @Path("/verify")
     public Response verifyToken(@HeaderParam("Authorization") String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            throw new UnauthorizedException("Missing or invalid Authorization header");
+            throw new UnauthorizedException("Cabeçalho de autorização em falta ou inválido");
         }
 
         String token = authHeader.substring("Bearer ".length()).trim();
@@ -144,29 +165,49 @@ public class AuthResource {
     @Path("/recover")
     public Response recoverPassword(RecoverPasswordDTO body) {
         if (body == null || body.email == null || body.email.isBlank()) {
-            throw new BadRequestException("email é obrigatório");
+            throw new BadRequestException("O email é obrigatório");
         }
 
-        // Simula verificação
-        User user = null;
-        try {
-            // Assumindo que authService pode procurar por email ou criar um método no UserBean
-            // Por simplicidade, vou procurar no authService se houver, ou ignorar
-            // Mas o AuthResource tem access ao AuthService
-            // Como AuthService só tem findUserByUsername e authenticate,
-            // talvez seja melhor injetar UserBean aqui se for preciso ou adicionar metodo no AuthService
-            // Vou assumir que o sistema envia email sempre para não revelar users
-            
-            // Enviamos email "fire and forget" para não bloquear
-            emailBean.send(body.email, "Academics - Password Recovery", 
-                "Recebemos um pedido de recuperação.\n\nSe foste tu, clica aqui para recuperar (link fictício).");
+        String token = authService.generateResetToken(body.email);
+        
+        if (token == null) {
+            return Response.status(Response.Status.NOT_FOUND).entity("{\"message\": \"Email não encontrado.\"}").build();
+        }
 
+        String link = "http://localhost:3000/reset-password?token=" + token;
+        String message = "Recebemos um pedido de recuperação.\n\nClica aqui para definir uma nova password:\n" + link;
+        
+        try {
+            emailBean.send(body.email, "Academics - Recuperação de Password", message);
         } catch (Exception e) {
             e.printStackTrace();
         }
 
-        return Response.ok("{\"message\":\"Se o email existir, receberá instruções\"}").build();
+        return Response.ok("{\"message\":\"Email enviado! Verifica o teu email.\"}").build();
     }
+
+    @POST
+    @Path("/reset-password")
+    public Response resetPassword(ResetRequest request) {
+        if (request == null || request.token == null || request.password == null) {
+            throw new BadRequestException("Token e nova password são obrigatórios");
+        }
+
+        boolean success = authService.updatePasswordWithToken(request.token, request.password);
+        if (!success) {
+            throw new BadRequestException("Token inválido ou expirado");
+        }
+
+        return Response.ok("{\"message\":\"Password alterada com sucesso. Podes fazer login agora.\"}").build();
+    }
+
+    // ... (Inner classes unchanged) ...
+    public static class ResetRequest {
+        public String token;
+        public String password;
+    }
+
+    // (Outras classes auxiliares já existem abaixo)
 
     // EP-03: Alterar password do próprio
     @PUT
@@ -176,26 +217,24 @@ public class AuthResource {
     public Response changePassword(ChangePasswordDTO body,
                                    @jakarta.ws.rs.core.Context jakarta.ws.rs.core.SecurityContext sc) {
         if (body == null || body.oldPassword == null || body.newPassword == null) {
-            throw new BadRequestException("oldPassword e newPassword são obrigatórios");
+            throw new BadRequestException("Palavra-passe antiga e nova são obrigatórias");
         }
 
         String username = sc.getUserPrincipal().getName();
         User user = authService.findUserByUsername(username);
         if (user == null) {
-            throw new UnauthorizedException("User not found");
+            throw new UnauthorizedException("Utilizador não encontrado");
         }
 
         // idealmente deverias usar Hasher.verify aqui, mas mantive a lógica que já tinhas
         if (!body.oldPassword.equals(user.getPassword())) {
-            throw new ForbiddenException("oldPassword inválida");
+            throw new ForbiddenException("Palavra-passe antiga inválida");
         }
 
         user.setPassword(body.newPassword);
 
-        return Response.ok("{\"message\":\"Password alterada com sucesso\"}").build();
+        return Response.ok("{\"message\":\"Palavra-passe alterada com sucesso\"}").build();
     }
-
-    // ============ INNER CLASSES PARA REQUEST/RESPONSE ============
 
     public static class LoginRequest {
         private String username;
@@ -275,12 +314,16 @@ public class AuthResource {
     @Path("/signup")
     public Response signup(SignupRequest request) {
         if (request == null || request.username == null || request.password == null || request.email == null) {
-            throw new BadRequestException("Username, password and email are required");
+            throw new BadRequestException("Nome de utilizador, palavra-passe e email são obrigatórios");
         }
 
         User existing = userBean.find(request.username);
         if (existing != null) {
-            throw new ConflictException("Username already exists");
+            return Response.status(Response.Status.CONFLICT).entity("{\"message\": \"Nome de utilizador já existe\"}").build();
+        }
+
+        if (authService.findUserByEmail(request.email) != null) {
+            return Response.status(Response.Status.CONFLICT).entity("{\"message\": \"Este email já está registado\"}").build();
         }
         
         // Define role CONTRIBUTOR para novos registos públicos
@@ -292,9 +335,7 @@ public class AuthResource {
         );
         
         return Response.status(Response.Status.CREATED)
-            .entity(new LoginResponse(null, newUser.getUsername(), newUser.getRole().toString())) // Retorna username, token null (obriga login) ou gera token?
-            // Melhor obrigar login ou gerar token já. 
-            // Para simplicidade, retorna 201 Created e o user faz login a seguir.
+            .entity(new LoginResponse(null, newUser.getUsername(), newUser.getRole().toString())) 
             .build(); 
     }
 }

@@ -11,11 +11,14 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.SecurityContext;
 import jakarta.ws.rs.core.UriInfo;
+import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
 import pt.ipleiria.estg.dei.ei.dae.academics.ejbs.UserBean;
+import pt.ipleiria.estg.dei.ei.dae.academics.entities.User;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
+import java.security.Key;
 import java.security.Principal;
 
 @Provider
@@ -23,76 +26,46 @@ import java.security.Principal;
 @Priority(Priorities.AUTHENTICATION)
 public class AuthenticationFilter implements ContainerRequestFilter {
 
-//    @EJB
-//    private UserBean userBean;
-    
-    public AuthenticationFilter() {
-        System.out.println("DEBUG_FILTER: AuthenticationFilter instantiated.");
-    }
+    @EJB
+    private UserBean userBean;
 
     @Context
     private UriInfo uriInfo;
 
-    private String getUsername(String token) {
-        // Implementação movida para dentro do filter() ou validação extra
-        // Na verdade, precisamos de validar claims.
-        return null; // não usado diretamente agora
-    }
-    
-    // Método auxiliar para parsing e validação completa
-    private io.jsonwebtoken.Claims getClaims(String token) {
-        SecretKey key = new SecretKeySpec(
-                TokenIssuer.SECRET_KEY, 0, TokenIssuer.SECRET_KEY.length, TokenIssuer.ALGORITHM);
-        return Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-    }
-
     @Override
     public void filter(ContainerRequestContext requestContext) {
-        String path = requestContext.getUriInfo().getPath();
-        System.out.println("DEBUG_FILTER: Filtering request: " + path);
-
         var header = requestContext.getHeaderString(HttpHeaders.AUTHORIZATION);
         if (header == null || !header.startsWith("Bearer ")) {
-            throw new NotAuthorizedException("Authorization header must be provided");
+            throw new NotAuthorizedException("O cabeçalho de autorização é obrigatório");
         }
 
         String token = header.substring("Bearer ".length()).trim();
         
         try {
-            var claims = getClaims(token);
+            Key key = new SecretKeySpec(TokenIssuer.SECRET_KEY, TokenIssuer.ALGORITHM);
+            
+            // Obter as claims (dados) do token
+            var claims = Jwts.parser()
+                    .verifyWith((javax.crypto.SecretKey) key)
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+                    
             String username = claims.getSubject();
-            System.out.println("DEBUG_FILTER: Claims parsed. Subject=" + username);
-            
-//            if (userBean == null) {
-//                System.out.println("DEBUG_FILTER: FATAL - userBean is null!");
-//                throw new NotAuthorizedException("Internal Error: Injection failed");
-//            }
-            
-            String tokenVersion = claims.get("version", String.class);
-            
-//            var user = userBean.find(username);
-//            if (user == null) {
-//                throw new NotAuthorizedException("User not found");
-//            }
+            String tokenAuthVersion = claims.get("authVersion", String.class); // <--- LER DO TOKEN
 
-            // EP99 - Force logout if user is blocked/deleted
-//            if (!user.isActive()) { // user.status check
-//                throw new NotAuthorizedException("User is blocked or inactive");
-//            }
+            User user = userBean.find(username);
             
-            // Single Session Check
-            String uVer = null; // user.getAuthVersion();
-            System.out.println("DEBUG_FILTER: TokenVer=" + tokenVersion + " | UserVer=" + uVer);
-
-            if (uVer != null && !uVer.equals(tokenVersion)) {
-                 System.out.println("DEBUG_FILTER: Mismatch! Denying access.");
-                 throw new NotAuthorizedException("Session expired (logged in elsewhere)");
+            // Validação extra: O user existe E a versão bate certo?
+            if (user == null || 
+                user.getAuthVersion() == null || 
+                !user.getAuthVersion().equals(tokenAuthVersion)) {
+                
+                // Se a versão for diferente, significa que alguém fez login noutro sítio
+                requestContext.abortWith(Response.status(Response.Status.UNAUTHORIZED).build());
+                return;
             }
-
+        
             requestContext.setSecurityContext(new SecurityContext() {
                 @Override
                 public Principal getUserPrincipal() {
@@ -100,7 +73,7 @@ public class AuthenticationFilter implements ContainerRequestFilter {
                 }
                 @Override
                 public boolean isUserInRole(String s) {
-                    return true; // user.getRole() != null && user.getRole().name().equals(s);
+                    return user.getRole() != null && user.getRole().name().equals(s);
                 }
                 @Override
                 public boolean isSecure() {
@@ -113,7 +86,7 @@ public class AuthenticationFilter implements ContainerRequestFilter {
             });
             
         } catch (Exception e) {
-            throw new NotAuthorizedException("Invalid JWT: " + e.getMessage());
+            requestContext.abortWith(Response.status(Response.Status.UNAUTHORIZED).build());
         }
     }
 }

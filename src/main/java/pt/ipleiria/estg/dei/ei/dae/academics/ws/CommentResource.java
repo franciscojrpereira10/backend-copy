@@ -142,9 +142,9 @@ public class CommentResource {
 
         boolean isAuthor = c.getAuthor() != null &&
                 c.getAuthor().getId().equals(user.getId());
-        boolean isAdmin = sc.isUserInRole("ADMIN");
+        boolean isManagerOrAdmin = sc.isUserInRole("MANAGER") || sc.isUserInRole("ADMIN");
 
-        if (!isAuthor && !isAdmin) {
+        if (!isAuthor && !isManagerOrAdmin) {
             throw new ForbiddenException("Not allowed to delete this comment");
         }
 

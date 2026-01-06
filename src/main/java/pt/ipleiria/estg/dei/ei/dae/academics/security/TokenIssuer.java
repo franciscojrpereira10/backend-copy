@@ -19,18 +19,15 @@ public class TokenIssuer {
     public static final String ALGORITHM = "HMACSHA384";
     public static final long EXPIRY_MINS = 60L;
 
-    public static String issue(String username, String authVersion) {
-        var expiryPeriod = LocalDateTime.now().plusMinutes(EXPIRY_MINS);
-        var expirationDateTime = Date.from(
-                expiryPeriod.atZone(ZoneId.systemDefault()).toInstant()
-        );
-        Key key = new SecretKeySpec(SECRET_KEY, ALGORITHM);
-        return Jwts.builder()
-                .subject(username)
-                .claim("version", authVersion) // EP - Single Session
-                .issuedAt(new Date())
-                .expiration(expirationDateTime)
-                .signWith(key)
-                .compact();
-    }
+    public String issue(String username, String authVersion) {
+    Key key = new SecretKeySpec(SECRET_KEY, ALGORITHM);
+    
+    return Jwts.builder()
+            .subject(username)
+            .claim("authVersion", authVersion) // <--- ADICIONAR ESTA LINHA
+            .issuedAt(new Date())
+            .expiration(Date.from(LocalDateTime.now().plusMinutes(EXPIRY_MINS).atZone(ZoneId.systemDefault()).toInstant()))
+            .signWith(key)
+            .compact();
+}
 }

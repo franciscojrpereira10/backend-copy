@@ -67,13 +67,13 @@ public class Publication {
             inverseJoinColumns = @JoinColumn(name = "tag_id"))
     private List<Tag> tags;
 
-    @OneToMany(fetch = FetchType.LAZY)
+    @OneToMany(fetch = FetchType.LAZY, cascade = CascadeType.REMOVE)
     private List<Comment> comments;
 
-    @OneToMany(mappedBy = "publication", fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "publication", fetch = FetchType.LAZY, cascade = CascadeType.REMOVE)
     private List<Rating> ratings;
 
-    @OneToMany(mappedBy = "publication", fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "publication", fetch = FetchType.LAZY, cascade = CascadeType.REMOVE)
     private List<PublicationHistory> history;
 
     public Publication() {

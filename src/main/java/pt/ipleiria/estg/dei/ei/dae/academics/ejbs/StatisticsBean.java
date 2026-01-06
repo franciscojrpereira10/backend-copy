@@ -41,6 +41,14 @@ public class StatisticsBean {
         stats.put("visiblePublications", visiblePublications);
         stats.put("hiddenPublications", hiddenPublications);
 
+        long totalComments = (long) em.createQuery("SELECT COUNT(c) FROM Comment c", Long.class).getSingleResult();
+        long totalRatings = (long) em.createQuery("SELECT COUNT(r) FROM Rating r", Long.class).getSingleResult();
+        long totalTags = (long) em.createQuery("SELECT COUNT(t) FROM Tag t", Long.class).getSingleResult();
+
+        stats.put("totalComments", totalComments);
+        stats.put("totalRatings", totalRatings);
+        stats.put("totalTags", totalTags);
+
         return stats;
     }
 

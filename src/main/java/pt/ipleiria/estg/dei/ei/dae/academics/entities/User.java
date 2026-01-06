@@ -81,6 +81,13 @@ public class User implements Serializable {
     @Column(name = "last_login")
     private Date lastLogin;
 
+    @Column(name = "reset_token")
+    private String resetToken;
+
+    @Temporal(TemporalType.TIMESTAMP)
+    @Column(name = "reset_token_expiry")
+    private Date resetTokenExpiry;
+
     @OneToMany(mappedBy = "uploadedBy", fetch = FetchType.LAZY)
     private List<Publication> publications;
 
@@ -257,6 +264,22 @@ public class User implements Serializable {
 
     public void setAuthVersion(String authVersion) {
         this.authVersion = authVersion;
+    }
+
+    public String getResetToken() {
+        return resetToken;
+    }
+
+    public void setResetToken(String resetToken) {
+        this.resetToken = resetToken;
+    }
+
+    public Date getResetTokenExpiry() {
+        return resetTokenExpiry;
+    }
+
+    public void setResetTokenExpiry(Date resetTokenExpiry) {
+        this.resetTokenExpiry = resetTokenExpiry;
     }
 
     // conveniência para o EP43
