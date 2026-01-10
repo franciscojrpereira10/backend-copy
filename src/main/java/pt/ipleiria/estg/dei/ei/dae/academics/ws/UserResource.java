@@ -5,6 +5,8 @@ import jakarta.ejb.EJB;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.SecurityContext;
 import pt.ipleiria.estg.dei.ei.dae.academics.dtos.UserDTO;
 import pt.ipleiria.estg.dei.ei.dae.academics.ejbs.UserBean;
 import pt.ipleiria.estg.dei.ei.dae.academics.entities.User;
@@ -118,16 +120,27 @@ public class UserResource {
     @Path("/{id}/status")
     @RolesAllowed({"ADMIN"})
     @pt.ipleiria.estg.dei.ei.dae.academics.security.Authenticated
-    public Response changeStatus(@PathParam("id") Long id, ChangeStatusDTO body) {
+    public Response changeStatus(@PathParam("id") Long id, ChangeStatusDTO body, @Context SecurityContext sc) {
         if (body == null || body.status == null) {
             throw new BadRequestException("status é obrigatório");
         }
 
-        // NÃO fazer UserStatus.valueOf aqui
+        User admin = userBean.find(sc.getUserPrincipal().getName());
         User updated = userBean.changeStatus(id, body.status);
+        
         if (updated == null) {
             throw new EntityNotFoundException("Utilizador não encontrado");
         }
+
+        // Log for Admin
+        activityBean.create(admin, ActivityType.ACCOUNT, 
+            "Alterou o estado do utilizador " + updated.getUsername() + " para " + updated.getStatus(), 
+            "USER", updated.getId());
+
+        // Log for Target
+        activityBean.create(updated, ActivityType.ACCOUNT, 
+            "Estado da conta alterado para " + updated.getStatus() + " por " + admin.getUsername(), 
+            "USER", updated.getId());
 
         var response = new java.util.HashMap<String, Object>();
         response.put("id", updated.getId());
@@ -147,15 +160,27 @@ public class UserResource {
     @Path("/{id}/role")
     @RolesAllowed({"ADMIN"})
     @pt.ipleiria.estg.dei.ei.dae.academics.security.Authenticated
-    public Response changeRole(@PathParam("id") Long id, ChangeRoleDTO body) {
+    public Response changeRole(@PathParam("id") Long id, ChangeRoleDTO body, @Context SecurityContext sc) {
         if (body == null || body.role == null) {
             throw new BadRequestException("role é obrigatório");
         }
 
+        User admin = userBean.find(sc.getUserPrincipal().getName());
         User updated = userBean.changeRole(id, body.role);
+        
         if (updated == null) {
             throw new EntityNotFoundException("Utilizador não encontrado");
         }
+
+        // Log for Admin
+        activityBean.create(admin, ActivityType.ACCOUNT, 
+            "Alterou o role do utilizador " + updated.getUsername() + " para " + updated.getRole(), 
+            "USER", updated.getId());
+
+        // Log for Target
+        activityBean.create(updated, ActivityType.ACCOUNT, 
+            "Role alterado para " + updated.getRole() + " por " + admin.getUsername(), 
+            "USER", updated.getId());
 
         var response = new java.util.HashMap<String, Object>();
         response.put("id", updated.getId());
@@ -170,11 +195,21 @@ public class UserResource {
     @Path("/{id}")
     @RolesAllowed({"ADMIN"})
     @pt.ipleiria.estg.dei.ei.dae.academics.security.Authenticated
-    public Response delete(@PathParam("id") Long id) {
-        boolean removed = userBean.remove(id); // Changed to hard delete
+    public Response delete(@PathParam("id") Long id, @Context SecurityContext sc) {
+        User admin = userBean.find(sc.getUserPrincipal().getName());
+        User target = userBean.find(id); // Find before deleting to get username
+        String targetUsername = (target != null) ? target.getUsername() : "Unknown";
+
+        boolean removed = userBean.remove(id); 
         if (!removed) {
             throw new EntityNotFoundException("Utilizador não encontrado");
         }
+
+        // Log for Admin only (Target is deleted)
+        activityBean.create(admin, ActivityType.DELETE, 
+            "Eliminou permanentemente o utilizador " + targetUsername, 
+            "USER", id);
+
         return Response.ok()
                 .entity(java.util.Map.of("message", "Utilizador eliminado permanentemente."))
                 .build();

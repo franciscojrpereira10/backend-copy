@@ -72,11 +72,22 @@ public class PublicationResource {
             }
         }
 
-        List<Publication> data = publicationBean.list(page, size, includeHidden);
+        List<Publication> data = publicationBean.list(page, size, includeHidden, sortBy, order);
         List<PublicationDTO> dtos = PublicationDTO.from(data);
 
-        dtos = publicationBean.sortPublications(dtos, sortBy, order);
+        // Populate stats for each DTO (N+1 but necessary for display, limited by page size)
+        for (int i = 0; i < data.size(); i++) {
+            Publication p = data.get(i);
+            PublicationDTO dto = dtos.get(i);
+            
+            dto.setCommentCount((int) publicationBean.countComments(p));
+            dto.setRatingsCount((int) publicationBean.countRatings(p));
+            dto.setAverageRating(publicationBean.averageRating(p));
+            dto.setTags(publicationBean.tags(p)); // Optional: load tags if needed for display
+        }
 
+        // dtos = publicationBean.sortPublications(dtos, sortBy, order); // No longer needed, DB sorted
+        
         return Response.ok(dtos).build();
     }
 
@@ -858,7 +869,7 @@ public class PublicationResource {
             }
 
             // 3. Atualizar BD
-            publicationBean.updateFile(id, newFilename, fileType);
+            publicationBean.updateFile(id, newFilename, fileType, user);
 
             return Response.ok()
                     .entity("Ficheiro atualizado com sucesso")

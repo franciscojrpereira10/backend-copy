@@ -35,6 +35,12 @@ public class ActivityBean {
 
         return q.getResultList();
     }
+
+    public long countByUser(Long userId) {
+        return em.createQuery("SELECT COUNT(a) FROM Activity a WHERE a.user.id = :uid", Long.class)
+                .setParameter("uid", userId)
+                .getSingleResult();
+    }
     public void create(pt.ipleiria.estg.dei.ei.dae.academics.entities.User user, ActivityType type, String description, String entityType, Long entityId) {
         Activity activity = new Activity();
         activity.setUser(user);

@@ -9,5 +9,6 @@ public enum ActivityType {
     DELETE,
     VISIBILITY,
     TAG_SUBSCRIBE,
-    TAG_UNSUBSCRIBE
+    TAG_UNSUBSCRIBE,
+    ACCOUNT
 }

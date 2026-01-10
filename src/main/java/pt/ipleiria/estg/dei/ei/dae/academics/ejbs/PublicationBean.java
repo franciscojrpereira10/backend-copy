@@ -50,13 +50,49 @@ public class PublicationBean {
     }
 
     public List<Publication> list(int page, int size, boolean includeHidden) {
-        String jpql = "SELECT p FROM Publication p";
-        if (!includeHidden) {
-            jpql += " WHERE p.visible = true";
-        }
-        jpql += " ORDER BY p.createdAt DESC";
+        return list(page, size, includeHidden, "createdAt", "desc");
+    }
 
-        return em.createQuery(jpql, Publication.class)
+    public List<Publication> list(int page, int size, boolean includeHidden, String sortBy, String order) {
+        StringBuilder jpql = new StringBuilder("SELECT p FROM Publication p ");
+        
+        // Join para rating se necessário
+        if ("rating".equals(sortBy)) {
+            jpql.append("LEFT JOIN p.ratings r ");
+        }
+
+        jpql.append("WHERE 1=1 ");
+        if (!includeHidden) {
+            jpql.append("AND p.visible = true ");
+        }
+        
+        // Agrupamento necessário para funções de agregação
+        if ("rating".equals(sortBy)) {
+            jpql.append("GROUP BY p ");
+        }
+
+        String dir = "asc".equalsIgnoreCase(order) ? "ASC" : "DESC";
+        
+        switch (sortBy != null ? sortBy : "createdAt") {
+            case "comments":
+                jpql.append("ORDER BY SIZE(p.comments) ").append(dir).append(", p.id DESC");
+                break;
+            case "rating":
+                // Coalesce para tratar nulls como 0
+                jpql.append("ORDER BY COALESCE(AVG(r.stars), 0) ").append(dir).append(", p.id DESC");
+                break;
+            case "ratingsCount":
+                jpql.append("ORDER BY SIZE(p.ratings) ").append(dir).append(", p.id DESC");
+                break;
+            case "title":
+                jpql.append("ORDER BY p.title ").append(dir).append(", p.id DESC");
+                break;
+            default:
+                jpql.append("ORDER BY p.createdAt ").append(dir).append(", p.id DESC");
+                break;
+        }
+
+        return em.createQuery(jpql.toString(), Publication.class)
                 .setFirstResult(page * size)
                 .setMaxResults(size)
                 .getResultList();
@@ -275,14 +311,10 @@ public class PublicationBean {
             p.setAuthors(authors);
         }
 
-        // tags (se a lista não for nula, atualizamos. Lista vazia remove todas)
+        // tags
         if (tagNames != null) {
-            // 1. Limpar tags atuais que não estão na nova lista
-            // (Para simplificar, limpamos tudo e re-adicionamos, ou fazemos diff. 
-            //  O "p.getTags().clear()" pode ser bruto, melhor diff.)
-            
-            // Vamos usar uma abordagem simples: setTags com as novas.
-            // Precisamos resolver os nomes para Entidades Tag
+            // Calcular tags antigas
+            String oldTags = p.getTags().stream().map(Tag::getName).sorted().reduce((a, b) -> a + "; " + b).orElse("");
             
             p.getTags().clear(); // Remove associações atuais
             
@@ -298,7 +330,13 @@ public class PublicationBean {
                     }
                 }
             }
-            // Nota: Não registamos histórico de tags individualmente nesta versão simples
+            
+            // Calcular tags novas
+            String newTags = p.getTags().stream().map(Tag::getName).sorted().reduce((a, b) -> a + "; " + b).orElse("");
+            
+            if (!oldTags.equals(newTags)) {
+                registerHistory(p, "tags", oldTags, newTags, editor);
+            }
         }
 
         if (p.getUploadedBy() != null) {
@@ -315,11 +353,17 @@ public class PublicationBean {
         em.flush();
     }
 
-    public void updateFile(Long id, String filename, FileType fileType) {
+    public void updateFile(Long id, String filename, FileType fileType, User editor) {
         Publication p = em.find(Publication.class, id);
         if (p != null) {
-            p.setFilename(filename);
-            p.setFileType(fileType);
+            if (filename != null && !filename.equals(p.getFilename())) {
+                 registerHistory(p, "filename", p.getFilename(), filename, editor);
+                 p.setFilename(filename);
+            }
+            if (fileType != null && p.getFileType() != fileType) {
+                 registerHistory(p, "fileType", p.getFileType().toString(), fileType.toString(), editor);
+                 p.setFileType(fileType);
+            }
             p.edit();
         }
     }
@@ -467,8 +511,9 @@ public class PublicationBean {
     public List<PublicationHistory> findHistory(Long publicationId) {
         return em.createQuery(
                         "SELECT h FROM PublicationHistory h " +
+                                "JOIN FETCH h.changedBy " + 
                                 "WHERE h.publication.id = :pid " +
-                                "ORDER BY h.changedAt DESC",   // <-- usa o nome real do campo de data
+                                "ORDER BY h.changedAt DESC",
                         PublicationHistory.class)
                 .setParameter("pid", publicationId)
                 .getResultList();

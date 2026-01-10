@@ -58,7 +58,7 @@ public class ActivityResource {
 
         Map<String,Object> resp = new HashMap<>();
         resp.put("activities", dtos);
-        resp.put("totalActivities", dtos.size());
+        resp.put("totalActivities", activityBean.countByUser(user.getId()));
 
         return Response.ok(resp).build();
     }
@@ -83,7 +83,7 @@ public class ActivityResource {
         Map<String,Object> resp = new HashMap<>();
         resp.put("userId", userId);
         resp.put("activities", dtos);
-        resp.put("totalActivities", dtos.size());
+        resp.put("totalActivities", activityBean.countByUser(userId));
 
         return Response.ok(resp).build();
     }
