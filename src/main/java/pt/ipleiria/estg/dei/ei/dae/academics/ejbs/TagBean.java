@@ -110,6 +110,9 @@ public class TagBean {
         return dtos;
     }
 
+    @jakarta.ejb.EJB
+    private ActivityBean activityBean;
+
     public void subscribe(Tag tag, User user) {
         Tag managedTag = em.merge(tag);
         User managedUser = em.merge(user);
@@ -127,6 +130,9 @@ public class TagBean {
 
         managedTag.getSubscribers().add(managedUser);
         managedUser.getSubscribedTags().add(managedTag);
+        
+        activityBean.create(managedUser, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.TAG_SUBSCRIBE,
+            "Seguiu a tag: " + managedTag.getName(), "Tag", managedTag.getId());
     }
 
     public void unsubscribe(Tag tag, User user) {
@@ -139,6 +145,9 @@ public class TagBean {
 
         managedTag.getSubscribers().remove(managedUser);
         managedUser.getSubscribedTags().remove(managedTag);
+
+        activityBean.create(managedUser, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.TAG_UNSUBSCRIBE,
+            "Deixou de seguir a tag: " + managedTag.getName(), "Tag", managedTag.getId());
     }
 
     public List<SubscriptionInfoDTO> listSubscriptions(User user) {
@@ -162,6 +171,9 @@ public class TagBean {
     }
 
     @jakarta.ejb.EJB
+    private NotificationBean notificationBean; // Injected
+
+    @jakarta.ejb.EJB
     private EmailBean emailBean;
 
     public void changeVisibility(Tag tag, boolean visible) {
@@ -175,6 +187,7 @@ public class TagBean {
         if (managedTag == null) return;
 
         for (User subscriber : managedTag.getSubscribers()) {
+            // Email
             if (subscriber.getEmail() != null && !subscriber.getEmail().isBlank()) {
                 String subject = "Nova Publicação na Tag: " + managedTag.getName();
                 String body = "Olá " + subscriber.getUsername() + ",\n\n" +
@@ -184,6 +197,19 @@ public class TagBean {
                         "Consulta na plataforma para mais detalhes.";
                 
                 emailBean.send(subscriber.getEmail(), subject, body);
+            }
+
+            // In-App Notification (NEW)
+            // Não notificar o próprio autor da publicação
+            if (!subscriber.getUsername().equals(publication.getUploadedBy().getUsername())) {
+                 notificationBean.create(
+                    subscriber,
+                    "Nova Publicação na Tag " + managedTag.getName(),
+                    "Nova publicação com a tag '" + managedTag.getName() + "': " + publication.getTitle(),
+                    pt.ipleiria.estg.dei.ei.dae.academics.enums.NotificationType.TAG_ACTIVITY,
+                    publication.getId(),
+                    "Publication"
+                );
             }
         }
     }
@@ -199,6 +225,7 @@ public class TagBean {
                 continue;
             }
 
+            // Email
             if (subscriber.getEmail() != null && !subscriber.getEmail().isBlank()) {
                 String subject = "Novo Comentário em Publicação com Tag: " + managedTag.getName();
                 String body = "Olá " + subscriber.getUsername() + ",\n\n" +
@@ -210,6 +237,16 @@ public class TagBean {
                 
                 emailBean.send(subscriber.getEmail(), subject, body);
             }
+
+            // In-App Notification (NEW)
+            notificationBean.create(
+                subscriber,
+                "Atividade na Tag " + managedTag.getName(),
+                comment.getAuthor().getUsername() + " comentou uma publicação com a tag '" + managedTag.getName() + "'.",
+                pt.ipleiria.estg.dei.ei.dae.academics.enums.NotificationType.TAG_ACTIVITY,
+                publication.getId(),
+                "Publication"
+            );
         }
     }
 

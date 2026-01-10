@@ -33,7 +33,7 @@ public class EmailBean {
                 message.setFrom(new InternetAddress("noreply@academics.pt"));
                 message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
                 message.setSubject(subject);
-                message.setText(text);
+                message.setContent(text, "text/html; charset=utf-8");
 
                 Transport.send(message);
                 logger.info("Email sent to " + to + " | Subject: " + subject);

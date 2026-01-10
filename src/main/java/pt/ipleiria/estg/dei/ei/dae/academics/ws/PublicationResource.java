@@ -232,13 +232,17 @@ public class PublicationResource {
     @Authenticated
     @RolesAllowed({"MANAGER", "ADMIN"})
     public Response deleteRating(@PathParam("id") Long publicationId, 
-                                 @PathParam("ratingId") Long ratingId) {
+                                 @PathParam("ratingId") Long ratingId,
+                                 @Context SecurityContext sc) {
         
         // Validações básicas
         Publication p = publicationBean.find(publicationId);
         if (p == null) throw new EntityNotFoundException("Publicação não encontrada");
 
-        publicationBean.deleteRating(ratingId);
+        String username = sc.getUserPrincipal().getName();
+        User user = userBean.find(username);
+
+        publicationBean.deleteRating(ratingId, user);
         return Response.ok().build();
     }
 
@@ -246,11 +250,15 @@ public class PublicationResource {
     @Path("/{id}/ratings/all")
     @Authenticated
     @RolesAllowed({"MANAGER", "ADMIN"})
-    public Response deleteAllRatings(@PathParam("id") Long publicationId) {
+    public Response deleteAllRatings(@PathParam("id") Long publicationId,
+                                     @Context SecurityContext sc) {
         Publication p = publicationBean.find(publicationId);
         if (p == null) throw new EntityNotFoundException("Publicação não encontrada");
+        
+        String username = sc.getUserPrincipal().getName();
+        User user = userBean.find(username);
 
-        publicationBean.deleteAllRatings(publicationId);
+        publicationBean.deleteAllRatings(publicationId, user);
         return Response.ok().build();
     }
 
@@ -294,7 +302,7 @@ public class PublicationResource {
             throw new ForbiddenException("Não tens permissão para apagar esta publicação");
         }
 
-        publicationBean.delete(id);
+        publicationBean.delete(id, user);
         return Response.noContent().build();
     }
 
@@ -459,18 +467,8 @@ public class PublicationResource {
         String username = sc.getUserPrincipal().getName();
         User editor = userBean.find(username);
 
-        publicationBean.updateMetadata(
-                p.getId(),
-                p.getTitle(),
-                p.getSummary(),
-                p.getScientificArea(),
-                p.getAuthors(),
-                null, // tags (não alterar)
-                editor
-        );
-        p.changeVisibility(body.visible, body.reason);
-        // --- FIX: Persistir a alteração ---
-        publicationBean.update(p);
+        publicationBean.changeVisibility(p.getId(), body.visible, editor);
+        p = publicationBean.find(p.getId()); // Reload state
         // ----------------------------------
 
         PublicationDTO dto = publicationBean.toDetailedDTO(p);

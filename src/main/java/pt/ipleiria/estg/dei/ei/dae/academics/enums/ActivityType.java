@@ -5,5 +5,9 @@ public enum ActivityType {
     UPLOAD,
     EDIT,
     COMMENT,
-    RATING
+    RATING,
+    DELETE,
+    VISIBILITY,
+    TAG_SUBSCRIBE,
+    TAG_UNSUBSCRIBE
 }

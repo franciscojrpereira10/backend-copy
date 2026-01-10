@@ -80,6 +80,12 @@ public class NotificationBean {
     public Notification create(User user, String title, String message,
                                pt.ipleiria.estg.dei.ei.dae.academics.enums.NotificationType type,
                                Long relatedEntityId, String relatedEntityType) {
+        
+        // Garantir que o user está managed para evitar erros de detached entity
+        if (!em.contains(user) && user.getId() != null) {
+            user = em.merge(user);
+        }
+
         Notification n = new Notification();
         n.setUser(user);
         n.setTitle(title);

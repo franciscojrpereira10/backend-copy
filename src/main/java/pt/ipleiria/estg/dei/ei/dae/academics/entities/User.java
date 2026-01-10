@@ -88,6 +88,9 @@ public class User implements Serializable {
     @Column(name = "reset_token_expiry")
     private Date resetTokenExpiry;
 
+    @Column(name = "profile_picture_filename")
+    private String profilePictureFilename;
+
     @OneToMany(mappedBy = "uploadedBy", fetch = FetchType.LAZY)
     private List<Publication> publications;
 
@@ -280,6 +283,14 @@ public class User implements Serializable {
 
     public void setResetTokenExpiry(Date resetTokenExpiry) {
         this.resetTokenExpiry = resetTokenExpiry;
+    }
+
+    public String getProfilePictureFilename() {
+        return profilePictureFilename;
+    }
+
+    public void setProfilePictureFilename(String profilePictureFilename) {
+        this.profilePictureFilename = profilePictureFilename;
     }
 
     // conveniência para o EP43

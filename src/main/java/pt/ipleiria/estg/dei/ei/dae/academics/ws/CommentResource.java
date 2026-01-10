@@ -113,8 +113,8 @@ public class CommentResource {
         }
 
         // apenas altera visibilidade no próprio comentário
-        c.changeVisibility(body.visible, body.reason);
-        commentBean.update(c);
+        commentBean.toggleVisibility(c.getId(), body.visible, editor);
+        c = commentBean.find(c.getId());
 
         CommentDTO dto = CommentDTO.from(c);
         return Response.ok(dto).build();
@@ -149,7 +149,7 @@ public class CommentResource {
         }
 
         // por agora delete físico; se quiseres soft delete podes só marcar visível=false
-        commentBean.remove(c.getId());
+        commentBean.remove(c.getId(), user);
 
         return Response.ok().build();
     }

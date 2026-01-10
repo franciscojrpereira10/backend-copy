@@ -16,6 +16,7 @@ public class UserDTO {
     private UserStatus status;
     private String createdAt;
     private String lastLogin;
+    private String profilePictureFilename;
 
     private int publicationCount;
     private int subscribedTagsCount;
@@ -65,6 +66,9 @@ public class UserDTO {
     public String getLastLogin() { return lastLogin; }
     public void setLastLogin(String lastLogin) { this.lastLogin = lastLogin; }
 
+    public String getProfilePictureFilename() { return profilePictureFilename; }
+    public void setProfilePictureFilename(String profilePictureFilename) { this.profilePictureFilename = profilePictureFilename; }
+
     public int getPublicationCount() { return publicationCount; }
     public void setPublicationCount(int publicationCount) { this.publicationCount = publicationCount; }
 
@@ -91,6 +95,7 @@ public class UserDTO {
         dto.setStatus(user.getStatus());
         dto.setCreatedAt(user.getCreatedAt() != null ? user.getCreatedAt().toInstant().toString() : null);
         dto.setLastLogin(user.getLastLogin() != null ? user.getLastLogin().toInstant().toString() : null);
+        dto.setProfilePictureFilename(user.getProfilePictureFilename());
 
         dto.setPublicationCount(0);
         dto.setSubscribedTagsCount(0);
@@ -115,6 +120,7 @@ public class UserDTO {
         dto.setRole(user.getRole());
         dto.setStatus(user.getStatus());
         dto.setCreatedAt(user.getCreatedAt() != null ? user.getCreatedAt().toInstant().toString() : null);
+        dto.setProfilePictureFilename(user.getProfilePictureFilename());
         return dto;
     }
 }

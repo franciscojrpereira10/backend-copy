@@ -175,7 +175,13 @@ public class AuthResource {
         }
 
         String link = "http://localhost:3000/reset-password?token=" + token;
-        String message = "Recebemos um pedido de recuperação.\n\nClica aqui para definir uma nova password:\n" + link;
+        String message = "<html><body>" +
+                "<h3>Recuperação de Password</h3>" +
+                "<p>Recebemos um pedido de recuperação para a tua conta.</p>" +
+                "<p>Clica no link abaixo para definir uma nova password:</p>" +
+                "<p><a href=\"" + link + "\">Alterar Password</a></p>" +
+                "<p><small>Se o link não funcionar, copia e cola o seguinte endereço no teu navegador: " + link + "</small></p>" +
+                "</body></html>";
         
         try {
             emailBean.send(body.email, "Academics - Recuperação de Password", message);
@@ -232,6 +238,7 @@ public class AuthResource {
         }
 
         user.setPassword(body.newPassword);
+        userBean.update(user);
 
         return Response.ok("{\"message\":\"Palavra-passe alterada com sucesso\"}").build();
     }

@@ -43,6 +43,14 @@ public class UserBean {
         return em.find(User.class, id);
     }
 
+    public void updateProfilePicture(Long userId, String filename) {
+        User user = em.find(User.class, userId);
+        if (user != null) {
+            user.setProfilePictureFilename(filename);
+            em.merge(user);
+        }
+    }
+
     public User find(String username) {
         try {
             return em.createNamedQuery("getUserByName", User.class)

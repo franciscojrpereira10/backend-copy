@@ -32,7 +32,7 @@ public class ConfigBean {
     public void init() {
         try {
             // não repete seed se já existir pelo menos um user
-            this.uploadsDir = "/opt/jboss/academics_uploads";
+            this.uploadsDir = System.getProperty("user.home") + "/academics_uploads";
             List<User> existing = userBean.getAll();
             if (existing != null && !existing.isEmpty()) {
                 System.out.println("ConfigBean: dados já existem, não é necessário popular.");

@@ -28,6 +28,9 @@ public class PublicationBean {
     @PersistenceContext
     private EntityManager em;
 
+    @jakarta.ejb.EJB
+    private ActivityBean activityBean;
+
     // --- Configuração OLLAMA ---
     private static final String OLLAMA_API_URL = "http://ollama:11434/api/generate";
     private static final String MODEL = "llama3";
@@ -92,6 +95,10 @@ public class PublicationBean {
 
         em.persist(p);
         em.flush();
+
+        activityBean.create(uploader, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.UPLOAD,
+            "Criada publicação: " + title, "Publication", p.getId());
+
         return p.getId();
     }
 
@@ -160,10 +167,19 @@ public class PublicationBean {
         rating.setStars(stars);           // definir antes de persistir
         rating.setUpdatedAt(new Date());
 
-        if (rating.getId() == null) {
+
+        boolean isNew = (rating.getId() == null);
+
+        if (isNew) {
             em.persist(rating);
         } else {
             rating = em.merge(rating);
+        }
+        em.flush();
+
+        if (isNew) {
+             activityBean.create(user, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.RATING,
+                "Avaliou com " + rating.getStars() + " estrelas: " + publication.getTitle(), "Rating", rating.getId());
         }
 
         em.flush();
@@ -173,6 +189,8 @@ public class PublicationBean {
     public void deleteRating(User user, Publication publication) {
         Rating rating = findRatingByUserAndPublication(user, publication);
         if (rating != null) {
+            activityBean.create(user, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.DELETE,
+                "Apagou a avaliação da publicação: " + publication.getTitle(), "Rating", rating.getId());
             em.remove(rating);
         }
     }
@@ -283,6 +301,11 @@ public class PublicationBean {
             // Nota: Não registamos histórico de tags individualmente nesta versão simples
         }
 
+        if (p.getUploadedBy() != null) {
+             activityBean.create(editor, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.EDIT,
+                "Editou a publicação: " + p.getTitle(), "Publication", p.getId());
+        }
+        
         p.edit(); // atualiza updatedAt
         return p;
     }
@@ -371,6 +394,9 @@ public class PublicationBean {
     @jakarta.ejb.EJB
     private TagBean tagBean;
 
+    @jakarta.ejb.EJB
+    private pt.ipleiria.estg.dei.ei.dae.academics.ejbs.NotificationBean notificationBean;
+
     public Comment createComment(User author, Publication publication, String content) {
         if (author == null || publication == null) {
             throw new IllegalArgumentException("author/publication cannot be null");
@@ -384,6 +410,23 @@ public class PublicationBean {
         c.setCreatedAt(new Date());
         c.setUpdatedAt(new Date());
         em.persist(c);
+        em.flush();
+
+        activityBean.create(author, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.COMMENT,
+            "Comentou: \"" + content + "\" em " + publication.getTitle(), "Comment", c.getId());
+
+        // Notificar o autor da publicação (se não for o próprio)
+        if (publication.getUploadedBy() != null && !publication.getUploadedBy().getUsername().equals(author.getUsername())) {
+            notificationBean.create(
+                publication.getUploadedBy(),
+                "Novo Comentário",
+                author.getUsername() + " comentou a sua publicação: \"" + publication.getTitle() + "\"",
+                pt.ipleiria.estg.dei.ei.dae.academics.enums.NotificationType.NEW_COMMENT,
+                c.getId(),
+                "Comment"
+            );
+        }
+
         em.flush();
 
         // Notificar subscritores das tags (Cenário 3)
@@ -552,9 +595,15 @@ public class PublicationBean {
         }
     }
 
-    public void delete(Long id) {
+    public void delete(Long id, User performedBy) {
         Publication p = em.find(Publication.class, id);
         if (p != null) {
+            // Log before delete
+             if (performedBy != null) {
+                activityBean.create(performedBy, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.DELETE,
+                    "Apagou a publicação: " + p.getTitle(), "Publication", p.getId()); // ID might be lost in DB but activity prevails? Activity has entityId but if entity is gone... history remains.
+            }
+
             // Limpa as tags associadas (remove da tabela de junção)
             p.getTags().clear(); // Atualiza a relação ManyToMany
 
@@ -574,6 +623,19 @@ public class PublicationBean {
             em.remove(p);
         }
     }
+    
+    public void changeVisibility(Long id, boolean visible, User performedBy) {
+        Publication p = em.find(Publication.class, id);
+        if (p != null) {
+            p.setVisible(visible);
+            // p.setVisibilityReason(reason); // Simplified
+            p.setUpdatedAt(new Date());
+            em.merge(p);
+            
+             activityBean.create(performedBy, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.VISIBILITY,
+                (visible ? "Mostrou" : "Ocultou") + " a publicação: " + p.getTitle(), "Publication", p.getId());
+        }
+    }
 
     // --- Rating Management ---
     public Rating findRating(Long id) {
@@ -588,9 +650,12 @@ public class PublicationBean {
             .getResultList();
     }
 
-    public void deleteRating(Long ratingId) {
+    public void deleteRating(Long ratingId, User performedBy) {
         Rating r = findRating(ratingId);
         if (r != null) {
+            activityBean.create(performedBy, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.DELETE,
+                "Apagou a avaliação da publicação: " + r.getPublication().getTitle(), "Rating", r.getId());
+            
             // Se estiver numa relação bidirecional com Publication, remove da lista lá
             if (r.getPublication() != null) {
                 r.getPublication().getRatings().remove(r);
@@ -599,17 +664,19 @@ public class PublicationBean {
         }
     }
 
-    public void deleteAllRatings(Long publicationId) {
-        // Usa query para apagar tudo de uma vez (mais eficiente)
+    public void deleteAllRatings(Long publicationId, User performedBy) {
+        // Logging bulk action effectively:
+        Publication p = find(publicationId);
+        if (p != null) {
+            activityBean.create(performedBy, pt.ipleiria.estg.dei.ei.dae.academics.enums.ActivityType.DELETE,
+                "Apagou todas as avaliações da publicação: " + p.getTitle(), "Publication", p.getId());
+                
+            p.getRatings().clear();
+        }
+
+        // Usa query para apagar tudo de uma vez
         em.createQuery("DELETE FROM Rating r WHERE r.publication.id = :pubId")
           .setParameter("pubId", publicationId)
           .executeUpdate();
-        
-        // Ou se precisares de caches atualizadas, iterar. Mas delete bulk é melhor para "Delete All".
-        // No entanto, para garantir consistência do EM:
-        Publication p = find(publicationId);
-        if (p != null) {
-            p.getRatings().clear();
-        }
     }
 }

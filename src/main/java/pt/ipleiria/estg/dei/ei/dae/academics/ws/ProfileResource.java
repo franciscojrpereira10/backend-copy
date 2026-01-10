@@ -64,6 +64,7 @@ public class ProfileResource {
         resp.put("status", user.getStatus().name());
         resp.put("statistics", stats);
         resp.put("preferences", prefs);
+        resp.put("profilePictureFilename", user.getProfilePictureFilename());
 
         return Response.ok(resp).build();
     }
